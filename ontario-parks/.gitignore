@@ -1,0 +1,6 @@
+ontario_parks_config.json
+*.png
+*.log
+.venv/
+__pycache__/
+.pytest_cache/
