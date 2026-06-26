@@ -4,3 +4,5 @@ ontario_parks_config.json
 .venv/
 __pycache__/
 .pytest_cache/
+*Zone.Identifier
+
