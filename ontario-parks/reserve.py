@@ -87,6 +87,56 @@ WEATHER_CODES = {
     99: "Thunderstorm with Heavy Hail"
 }
 
+def input_with_timeout(prompt, timeout=60, default=""):
+    """
+    Prompts the user for input and returns it.
+    If no input is received within the specified timeout (in seconds) or if the terminal is non-interactive,
+    returns the default value.
+    """
+    print(prompt, end="", flush=True)
+    
+    # If stdin is not a TTY, return default immediately to prevent hanging in background runners
+    if not sys.stdin.isatty():
+        print(f"\n[Non-Interactive] Auto-selecting default value: '{default}'")
+        return default
+        
+    try:
+        # Under Windows, use msvcrt to check for input without blocking
+        if os.name == 'nt':
+            import msvcrt
+            start_time = time.time()
+            input_str = ""
+            while True:
+                if time.time() - start_time > timeout:
+                    print(f"\n[Timeout] Auto-selecting default value: '{default}'")
+                    return default
+                if msvcrt.kbhit():
+                    char = msvcrt.getwche() # Reads character and echoes it
+                    if char in ('\r', '\n'): # Enter key
+                        print() # Move to next line
+                        return input_str.strip()
+                    elif char == '\b': # Backspace
+                        if len(input_str) > 0:
+                            input_str = input_str[:-1]
+                            sys.stdout.write(' \b')
+                            sys.stdout.flush()
+                    else:
+                        input_str += char
+                time.sleep(0.05)
+        else:
+            # Under Linux/Unix/WSL, use select
+            import select
+            rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+            if rlist:
+                return sys.stdin.readline().strip()
+            else:
+                print(f"\n[Timeout] Auto-selecting default value: '{default}'")
+                return default
+    except Exception as e:
+        # Fallback if msvcrt or select fails
+        print(f"\n[Error/Fallback] {e}. Auto-selecting default: '{default}'")
+        return default
+
 def load_config():
     if not os.path.exists(CONFIG_PATH):
         print(f"Error: Config file not found at {CONFIG_PATH}!")
@@ -288,7 +338,7 @@ def main():
     for idx, (label, d) in enumerate(dates):
         print(f" {idx + 1}. {label} ({d.strftime('%A, %b %d, %Y')})")
         
-    choice = input("\nEnter date selection (1-3) [default: 2 (Tomorrow)]: ").strip()
+    choice = input_with_timeout("\nEnter date selection (1-3) [default: 2 (Tomorrow)]: ", timeout=30, default="2").strip()
     if not choice:
         choice = 2
     else:
@@ -316,7 +366,7 @@ def main():
     # Check if we need to resolve Chat ID
     if not config.get("telegram_chat_id"):
         print("\n⚠️ Telegram Chat ID is not configured!")
-        setup = input("Would you like to resolve your Telegram Chat ID now? (y/n) [default: y]: ").strip().lower()
+        setup = input_with_timeout("Would you like to resolve your Telegram Chat ID now? (y/n) [default: y]: ", timeout=30, default="y").strip().lower()
         if not setup or setup == 'y':
             chat_id = resolve_telegram_chat_id(config["telegram_token"])
             if chat_id:
@@ -355,7 +405,7 @@ def main():
     print("="*70)
     
     # 3. Select park
-    park_choice = input(f"\nSelect a park to reserve (1-{len(ranked_parks)}) [default: 1]: ").strip()
+    park_choice = input_with_timeout(f"\nSelect a park to reserve (1-{len(ranked_parks)}) [default: 1]: ", timeout=45, default="1").strip()
     if not park_choice:
         park_choice = 1
     else:
@@ -464,7 +514,7 @@ def main():
         print("account now in the opened browser window.")
         print("Once you are signed in and see the 'Additional Information' page, press Enter here.")
         print("*"*80)
-        input("\nPress Enter to continue after logging in...")
+        input_with_timeout("\nPress Enter to continue after logging in (Timeout in 180s)...", timeout=180, default="")
         
         # Now fill in vehicle and permit details
         print("\nFilling Additional Information fields...")
@@ -513,7 +563,7 @@ def main():
         print("Click 'Checkout' / 'Confirm' button in the browser to complete the booking.")
         print("Once you see the reservation confirmation screen (with the Reservation Number), press Enter here.")
         print("*"*80)
-        input("\nPress Enter to continue after checkout completion...")
+        input_with_timeout("\nPress Enter to continue after checkout completion (Timeout in 180s)...", timeout=180, default="")
         
         # Capture confirmation number
         print("\nScanning page for reservation number...")
