@@ -1,4 +1,5 @@
 ontario_parks_config.json
+.env
 *.png
 *.log
 .venv/

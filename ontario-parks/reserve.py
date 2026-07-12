@@ -138,12 +138,40 @@ def input_with_timeout(prompt, timeout=60, default=""):
         print(f"\n[Error/Fallback] {e}. Auto-selecting default: '{default}'")
         return default
 
+def load_env_file(filepath=None):
+    if filepath is None:
+        filepath = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(filepath):
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ[key.strip()] = val.strip().strip("'\"")
+
 def load_config():
-    if not os.path.exists(CONFIG_PATH):
-        print(f"Error: Config file not found at {CONFIG_PATH}!")
-        sys.exit(1)
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    load_env_file()
+    config = {}
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            try:
+                config = json.load(f)
+            except Exception:
+                pass
+                
+    # Overlay with Environment Variables (with fallbacks to config JSON keys)
+    config["email"] = os.environ.get("ONTARIO_PARKS_EMAIL", config.get("email", ""))
+    config["ontario_parks_password"] = os.environ.get("ONTARIO_PARKS_PASSWORD", config.get("ontario_parks_password", ""))
+    config["permit_number"] = os.environ.get("ONTARIO_PARKS_PERMIT", config.get("permit_number", ""))
+    config["vehicle_plate"] = os.environ.get("ONTARIO_PARKS_PLATE", config.get("vehicle_plate", ""))
+    config["vehicle_province"] = os.environ.get("ONTARIO_PARKS_PROVINCE", config.get("vehicle_province", "ONTARIO"))
+    config["phone"] = os.environ.get("ONTARIO_PARKS_PHONE", config.get("phone", ""))
+    config["telegram_token"] = os.environ.get("TELEGRAM_TOKEN", config.get("telegram_token", ""))
+    config["telegram_chat_id"] = os.environ.get("TELEGRAM_CHAT_ID", config.get("telegram_chat_id", ""))
+    config["gmail_app_password"] = os.environ.get("GMAIL_APP_PASSWORD", config.get("gmail_app_password", ""))
+    config["previously_selected_park"] = config.get("previously_selected_park", "")
+    
+    return config
 
 def save_config(config):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
