@@ -8,6 +8,7 @@ import email
 from email.header import decode_header
 import requests
 import urllib3
+import argparse
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
@@ -104,10 +105,10 @@ def input_with_timeout(prompt, timeout=60, default=""):
         # Under Windows, use msvcrt to check for input without blocking
         if os.name == 'nt':
             import msvcrt
-            start_time = time.time()
+            start_time = time.monotonic()
             input_str = ""
             while True:
-                if time.time() - start_time > timeout:
+                if time.monotonic() - start_time > timeout:
                     print(f"\n[Timeout] Auto-selecting default value: '{default}'")
                     return default
                 if msvcrt.kbhit():
@@ -158,7 +159,6 @@ def fetch_weather_forecast(lat, lon, date_str):
     Fetches hourly wind forecast for a specific park and date from Open-Meteo.
     Filters hours between 9:00 AM and 6:00 PM.
     """
-    # Use wind_speed_unit=kn and verify=False to bypass SSL EOF issues on some networks
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code&wind_speed_unit=kn&timezone=America%2FNew_York"
     try:
         response = requests.get(url, timeout=10, verify=False)
@@ -176,7 +176,6 @@ def fetch_weather_forecast(lat, lon, date_str):
         weather_codes = []
         
         for idx, t_str in enumerate(times):
-            # Format: '2026-06-27T09:00'
             dt = datetime.datetime.fromisoformat(t_str)
             if dt.date() == target_date and 9 <= dt.hour <= 18:
                 wind_speeds.append(hourly["wind_speed_10m"][idx])
@@ -191,7 +190,6 @@ def fetch_weather_forecast(lat, lon, date_str):
         max_speed = max(wind_speeds)
         max_gust = max(wind_gusts)
         avg_dir = sum(wind_dirs) / len(wind_dirs)
-        # Find most common weather code
         code = max(set(weather_codes), key=weather_codes.count)
         
         return {
@@ -206,23 +204,18 @@ def fetch_weather_forecast(lat, lon, date_str):
         return None
 
 def resolve_telegram_chat_id(token):
-    """
-    Checks recent updates from Telegram Bot API to find the user's Chat ID.
-    """
     print("\n[Telegram Config] Checking for updates to find your Telegram Chat ID...")
     print("Please open Telegram, find your bot, and send a message (e.g. '/start' or 'hi').")
     print("Waiting for your message...")
     
     url = f"https://api.telegram.org/bot{token}/getUpdates"
     
-    # Poll for 60 seconds
     for attempt in range(20):
         try:
             res = requests.get(url, timeout=10)
             if res.status_code == 200:
                 updates = res.json().get("result", [])
                 if updates:
-                    # Look for the last update containing message details
                     for update in reversed(updates):
                         msg = update.get("message")
                         if msg:
@@ -253,18 +246,13 @@ def send_telegram_message(token, chat_id, text):
         print(f"Error sending message: {e}")
         return False
 
-def check_gmail_confirmation(email_user, app_password, date_str, expected_conf_num=None):
-    """
-    Connects to Gmail IMAP, searches for recent Ontario Parks confirmation emails,
-    and returns reservation details if found.
-    """
+def check_gmail_confirmation(email_user, app_password, date_str):
     print(f"\nConnecting to Gmail ({email_user}) via IMAP to check for reservation confirmation email...")
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(email_user, app_password)
         mail.select("inbox")
         
-        # Search for messages from ontarioparks.ca or containing "Ontario Parks" in subject
         status, messages = mail.search(None, '(SUBJECT "Ontario Parks")')
         if status != "OK":
             print("Failed to search emails.")
@@ -275,7 +263,6 @@ def check_gmail_confirmation(email_user, app_password, date_str, expected_conf_n
             print("No matching Ontario Parks emails found.")
             return None
             
-        # Get the most recent email
         latest_id = mail_ids[-1]
         status, data = mail.fetch(latest_id, "(RFC822)")
         if status != "OK":
@@ -284,7 +271,6 @@ def check_gmail_confirmation(email_user, app_password, date_str, expected_conf_n
         raw_email = data[0][1]
         msg = email.message_from_bytes(raw_email)
         
-        # Decode Subject
         subject, encoding = decode_header(msg["Subject"])[0]
         if isinstance(subject, bytes):
             subject = subject.decode(encoding or "utf-8")
@@ -305,10 +291,8 @@ def check_gmail_confirmation(email_user, app_password, date_str, expected_conf_n
         soup = BeautifulSoup(body, "html.parser")
         text_content = soup.get_text()
         
-        # Search for reservation number or confirmation details
         if "Confirmation" in text_content or "Reservation" in text_content or "OP-" in text_content:
             print("Found confirmation keywords in the email body!")
-            # Save email content to debug file
             debug_path = os.path.join(os.path.dirname(__file__), "confirmation_email.txt")
             with open(debug_path, "w", encoding="utf-8") as f:
                 f.write(text_content)
@@ -319,42 +303,260 @@ def check_gmail_confirmation(email_user, app_password, date_str, expected_conf_n
         print(f"Error checking email: {e}")
         return None
 
+def login_to_ontario_parks(page, email_user, password):
+    print("Navigating to sign in page...")
+    page.goto("https://reservations.ontarioparks.ca/sign-in", timeout=40000)
+    page.wait_for_load_state("networkidle")
+    time.sleep(2)
+    
+    email_input = page.locator("input[type='email'], input[id*='email'], input[formcontrolname='email']")
+    if email_input.count() > 0 and email_input.first.is_visible():
+        print(f"Signing in as {email_user}...")
+        email_input.first.fill(email_user)
+        time.sleep(1)
+        
+        password_input = page.locator("input[type='password'], input[id*='password'], input[formcontrolname='password']")
+        if password_input.count() > 0:
+            password_input.first.fill(password)
+            time.sleep(1)
+            
+        sign_in_btn = page.locator("button:has-text('Sign in'), button:has-text('Sign In')")
+        if sign_in_btn.count() > 0:
+            sign_in_btn.first.click()
+            print("Submitted credentials, waiting for navigation...")
+            time.sleep(5)
+            page.wait_for_load_state("networkidle")
+    else:
+        print("Already signed in or credentials form not found.")
+
+def run_checkout_wizard(page, config):
+    """
+    Scans and automates the sequential checkout wizard panels headlessly.
+    """
+    print("\nStarting automated checkout wizard...")
+    for attempt in range(25):
+        # 1. Review Reservation Details checkbox + confirm (Screenshot 3)
+        review_chk = page.locator("mat-checkbox:has-text('details are correct'), mat-checkbox")
+        review_btn = page.locator("button:has-text('Confirm reservation details')")
+        if review_btn.count() > 0 and review_btn.first.is_visible():
+            print("Wizard: Confirming reservation details...")
+            if review_chk.count() > 0 and not review_chk.first.is_checked():
+                review_chk.first.click()
+                time.sleep(1)
+            review_btn.first.click()
+            time.sleep(3)
+            page.wait_for_load_state("networkidle")
+            continue
+            
+        # 2. Shopping Cart proceed (Screenshot 4)
+        cart_btn = page.locator("button:has-text('Proceed to checkout')")
+        if cart_btn.count() > 0 and cart_btn.first.is_visible():
+            print("Wizard: Proceeding to checkout from shopping cart...")
+            cart_btn.first.click()
+            time.sleep(3)
+            page.wait_for_load_state("networkidle")
+            continue
+            
+        # 3. Policies Checkbox & Acknowledgement (Screenshot 6)
+        policies_chk = page.locator("mat-checkbox:has-text('agree'), mat-checkbox")
+        policies_btn = page.locator("button:has-text('Confirm acknowledgements')")
+        if policies_btn.count() > 0 and policies_btn.first.is_visible():
+            print("Wizard: Confirming policies acknowledgements...")
+            if policies_chk.count() > 0 and not policies_chk.first.is_checked():
+                policies_chk.first.click()
+                time.sleep(1)
+            policies_btn.first.click()
+            time.sleep(3)
+            page.wait_for_load_state("networkidle")
+            continue
+            
+        # 4. Confirm Account Info (Screenshot 7)
+        acc_btn = page.locator("button:has-text('Confirm account details')")
+        if acc_btn.count() > 0 and acc_btn.first.is_visible():
+            print("Wizard: Confirming account details...")
+            acc_btn.first.click()
+            time.sleep(3)
+            page.wait_for_load_state("networkidle")
+            continue
+            
+        # 5. Occupant details (Screenshot 8)
+        occupant_radio = page.locator("text=I will be the occupant")
+        occupant_btn = page.locator("button:has-text('Confirm occupant')")
+        if occupant_btn.count() > 0 and occupant_btn.first.is_visible():
+            print("Wizard: Selecting occupant...")
+            if occupant_radio.count() > 0:
+                occupant_radio.first.click()
+                time.sleep(1)
+            occupant_btn.first.click()
+            time.sleep(3)
+            page.wait_for_load_state("networkidle")
+            continue
+            
+        # 6. Additional Info details - Plate & Seasonal Permit (Screenshot 9)
+        additional_btn = page.locator("button:has-text('Confirm additional information')")
+        if additional_btn.count() > 0 and additional_btn.first.is_visible():
+            print("Wizard: Auto-filling plate and permit info...")
+            seasonal_radio = page.locator("text=Seasonal Vehicle Permit Holder")
+            if seasonal_radio.count() > 0:
+                seasonal_radio.first.click()
+                time.sleep(1)
+                
+            permit_input = page.locator("input[placeholder*='Pass'], input[id*='pass'], input[formcontrolname*='pass'], input[id*='Pass']")
+            if permit_input.count() > 0:
+                permit_input.first.fill(config["permit_number"])
+                print(" - Filled permit number:", config["permit_number"])
+                time.sleep(0.5)
+                
+            plate_input = page.locator("input[placeholder*='Plate'], input[id*='plate'], input[formcontrolname*='plate'], input[formcontrolname*='LicensePlate']")
+            if plate_input.count() > 0:
+                plate_input.first.fill(config["vehicle_plate"])
+                print(" - Filled license plate:", config["vehicle_plate"])
+                time.sleep(0.5)
+                
+            province_input = page.locator("input[placeholder*='Province'], input[id*='province'], input[formcontrolname*='province'], input[formcontrolname*='Province']")
+            if province_input.count() > 0:
+                province_input.first.fill(config["vehicle_province"])
+                print(" - Filled province:", config["vehicle_province"])
+                time.sleep(0.5)
+                
+            additional_btn.first.click()
+            time.sleep(3)
+            page.wait_for_load_state("networkidle")
+            continue
+            
+        # 7. Final Confirmation (Screenshot 10)
+        confirm_btn = page.locator("button:has-text('Confirm booking')")
+        if confirm_btn.count() > 0 and confirm_btn.first.is_visible():
+            print("Wizard: Finalizing and clicking Confirm Booking...")
+            confirm_btn.first.click()
+            time.sleep(5)
+            page.wait_for_load_state("networkidle")
+            continue
+            
+        # 8. Success page checking (Screenshot 11)
+        if "Success!" in page.locator("body").inner_text() or page.locator("text=Success!").count() > 0:
+            print("Wizard complete: Success page reached!")
+            break
+            
+        time.sleep(2)
+
+def list_reservations(email_user, password, headless=True):
+    print("Launching browser to list reservations...")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        page = context.new_page()
+        
+        login_to_ontario_parks(page, email_user, password)
+        
+        print("Navigating to My Reservations...")
+        page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
+        page.wait_for_load_state("networkidle")
+        time.sleep(3)
+        
+        page_text = page.locator("body").inner_text()
+        
+        import re
+        reservations = []
+        blocks = page_text.split("Reservation No")
+        for block in blocks[1:]:
+            num_match = re.search(r"(?::|#)?\s*([A-Z0-9\-]+)", block)
+            res_num = num_match.group(1).strip() if num_match else "Unknown"
+            
+            park_match = re.search(r"([A-Za-z\s']+\s*Provincial\s*Park)", block)
+            park = park_match.group(1).strip() if park_match else "Unknown"
+            
+            date_match = re.search(r"([A-Z][a-z]{2},\s*[A-Z][a-z]{2}\s*\d{1,2},\s*\d{4})", block)
+            res_date = date_match.group(1).strip() if date_match else "Unknown"
+            
+            occ_match = re.search(r"Occupant\s*:?\s*([A-Za-z\s]+)", block, re.IGNORECASE)
+            occupant = occ_match.group(1).strip().split("\n")[0] if occ_match else "Unknown"
+            
+            veh_match = re.search(r"Vehicle\s*:?\s*([A-Z0-9]+)", block, re.IGNORECASE)
+            vehicle = veh_match.group(1).strip() if veh_match else "Unknown"
+            
+            reservations.append({
+                "reservation_number": res_num,
+                "park": park,
+                "date": res_date,
+                "occupant": occupant,
+                "vehicle": vehicle
+            })
+            
+        # Write to JSON file
+        out_path = os.path.join(os.path.dirname(__file__), "active_reservations.json")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(reservations, f, indent=2)
+            
+        print(f"List results saved to {out_path}")
+        browser.close()
+        return reservations
+
+def cancel_reservation(email_user, password, target_res_num, headless=True):
+    print(f"Launching browser to cancel reservation {target_res_num}...")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        page = context.new_page()
+        
+        login_to_ontario_parks(page, email_user, password)
+        
+        print("Navigating to My Reservations...")
+        page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
+        page.wait_for_load_state("networkidle")
+        time.sleep(3)
+        
+        # Locate card containing the target reservation number
+        card = page.locator("div, section, mat-card", has_text=target_res_num)
+        
+        cancel_btn = card.locator("button:has-text('Cancel reservation')")
+        if cancel_btn.count() > 0 and cancel_btn.first.is_visible():
+            print("Found Cancel button! Clicking it...")
+            cancel_btn.first.click()
+            time.sleep(4)
+            page.wait_for_load_state("networkidle")
+            
+            confirm_cancel_btn = page.locator("button:has-text('Cancel reservation'), button:has-text('Confirm')")
+            if confirm_cancel_btn.count() > 0:
+                print("Confirming cancellation...")
+                confirm_cancel_btn.first.click()
+                time.sleep(5)
+                print(f"Reservation {target_res_num} cancelled successfully!")
+                browser.close()
+                return True
+        else:
+            print(f"Error: Could not find active 'Cancel reservation' button for {target_res_num}.")
+            
+        browser.close()
+        return False
+
 def main():
     config = load_config()
     
-    # 1. Ask about date
-    print("=" * 60)
-    print("Ontario Park Daily Vehicle Permit Helper")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description="Ontario Parks Reservation Helper")
+    subparsers = parser.add_subparsers(dest="command")
     
-    today = datetime.date.today()
-    dates = [
-        ("Today", today),
-        ("Tomorrow", today + datetime.timedelta(days=1)),
-        ("Day after tomorrow", today + datetime.timedelta(days=2))
-    ]
+    # Subcommands
+    book_parser = subparsers.add_parser("book", help="Book a daily vehicle permit")
+    book_parser.add_argument("--park", help="Name of the park (e.g. 'Sibbald Point')")
+    book_parser.add_argument("--date", help="Date: 'today', 'tomorrow', 'day_after', or YYYY-MM-DD")
+    book_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true", help="Run headlessly")
     
-    print("\nSelect a reservation date:")
-    for idx, (label, d) in enumerate(dates):
-        print(f" {idx + 1}. {label} ({d.strftime('%A, %b %d, %Y')})")
-        
-    choice = input_with_timeout("\nEnter date selection (1-3) [default: 2 (Tomorrow)]: ", timeout=30, default="2").strip()
-    if not choice:
-        choice = 2
-    else:
-        try:
-            choice = int(choice)
-            if choice < 1 or choice > 3:
-                choice = 2
-        except ValueError:
-            choice = 2
-            
-    target_label, target_date = dates[choice - 1]
-    target_date_str = target_date.strftime("%Y-%m-%d")
-    print(f"\nSelected Date: {target_label} ({target_date_str})")
+    list_parser = subparsers.add_parser("list", help="List active reservations")
+    list_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
     
-    # Check if CLI argument is given to configure Telegram
-    if len(sys.argv) > 1 and sys.argv[1] == "--setup-telegram":
+    cancel_parser = subparsers.add_parser("cancel", help="Cancel a reservation")
+    cancel_parser.add_argument("--reservation", required=True, help="Reservation number (e.g. INOP26-XXXXXX)")
+    cancel_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
+    
+    # Flags (for backward compatibility)
+    parser.add_argument("--setup-telegram", action="store_true", help="Configure Telegram Chat ID")
+    parser.add_argument("--forecast-only", action="store_true", help="Only show wind forecast and exit")
+    
+    args = parser.parse_args()
+    
+    # 1. Handle Setup commands
+    if args.setup_telegram or (len(sys.argv) > 1 and sys.argv[1] == "--setup-telegram"):
         chat_id = resolve_telegram_chat_id(config["telegram_token"])
         if chat_id:
             config["telegram_chat_id"] = chat_id
@@ -363,7 +565,97 @@ def main():
             print("Telegram Chat ID updated and test message sent successfully.")
         sys.exit(0)
         
-    # Check if we need to resolve Chat ID
+    # 2. Handle subcommands
+    if args.command == "list":
+        password = config.get("ontario_parks_password")
+        if not password:
+            print("Error: 'ontario_parks_password' is not configured in ontario_parks_config.json!")
+            sys.exit(1)
+        headless = args.headless == "true"
+        reservations = list_reservations(config["email"], password, headless=headless)
+        print("\nActive Reservations List:")
+        print("=" * 80)
+        for r in reservations:
+            print(f"Num: {r['reservation_number']:<18} | Park: {r['park']:<28} | Date: {r['date']:<16} | Vehicle: {r['vehicle']}")
+        print("=" * 80)
+        sys.exit(0)
+        
+    elif args.command == "cancel":
+        password = config.get("ontario_parks_password")
+        if not password:
+            print("Error: 'ontario_parks_password' is not configured in ontario_parks_config.json!")
+            sys.exit(1)
+        headless = args.headless == "true"
+        success = cancel_reservation(config["email"], password, args.reservation, headless=headless)
+        if success:
+            sys.exit(0)
+        else:
+            sys.exit(1)
+            
+    # Default to booking flow
+    is_headless = True
+    target_park_override = None
+    target_date_override = None
+    
+    if args.command == "book":
+        is_headless = args.headless == "true"
+        target_park_override = args.park
+        target_date_override = args.date
+        
+    # Ask about date if not overridden
+    today = datetime.date.today()
+    dates = [
+        ("Today", today),
+        ("Tomorrow", today + datetime.timedelta(days=1)),
+        ("Day after tomorrow", today + datetime.timedelta(days=2))
+    ]
+    
+    if target_date_override:
+        if target_date_override.lower() == "today":
+            choice = 1
+        elif target_date_override.lower() == "tomorrow":
+            choice = 2
+        elif target_date_override.lower() == "day_after":
+            choice = 3
+        else:
+            try:
+                custom_date = datetime.datetime.strptime(target_date_override, "%Y-%m-%d").date()
+                dates = [("Custom Date", custom_date)]
+                choice = 1
+            except ValueError:
+                print(f"Error: Invalid date format '{target_date_override}'. Use YYYY-MM-DD, today, tomorrow, or day_after.")
+                sys.exit(1)
+    else:
+        print("=" * 60)
+        print("Ontario Park Daily Vehicle Permit Helper")
+        print("=" * 60)
+        print("\nSelect a reservation date:")
+        for idx, (label, d) in enumerate(dates):
+            print(f" {idx + 1}. {label} ({d.strftime('%A, %b %d, %Y')})")
+            
+        choice = input_with_timeout("\nEnter date selection (1-3) [default: 2 (Tomorrow)]: ", timeout=30, default="2").strip()
+        if not choice:
+            choice = 2
+        else:
+            try:
+                choice = int(choice)
+                if choice < 1 or choice > 3:
+                    choice = 2
+            except ValueError:
+                choice = 2
+                
+    target_label, target_date = dates[choice - 1]
+    target_date_str = target_date.strftime("%Y-%m-%d")
+    print(f"\nSelected Date: {target_label} ({target_date_str})")
+    
+    if args.forecast_only:
+        print("\n[Weather/Wind] Fetching wind forecasts for participating kiting parks...")
+        for name, info in PARKS.items():
+            forecast = fetch_weather_forecast(info["lat"], info["lon"], target_date_str)
+            if forecast:
+                print(f" - {name:<30} | Wind: {forecast['max_speed']:>4} kts (Gust: {forecast['max_gust']:>4} kts) | {forecast['condition']}")
+        sys.exit(0)
+        
     if not config.get("telegram_chat_id"):
         print("\n⚠️ Telegram Chat ID is not configured!")
         setup = input_with_timeout("Would you like to resolve your Telegram Chat ID now? (y/n) [default: y]: ", timeout=30, default="y").strip().lower()
@@ -376,7 +668,6 @@ def main():
             else:
                 print("Could not resolve Chat ID. Notifications will fail. You can configure it manually in config.json.")
                 
-    # 2. Weather & Wind Forecast fetching and ranking
     print("\n[Weather/Wind] Fetching wind forecasts for participating kiting parks...")
     ranked_parks = []
     for name, info in PARKS.items():
@@ -391,7 +682,6 @@ def main():
                 "condition": forecast["condition"]
             })
             
-    # Sort by maximum wind speed descending
     ranked_parks.sort(key=lambda x: x["max_speed"], reverse=True)
     
     print("\n" + "="*70)
@@ -404,32 +694,39 @@ def main():
         print(f" {idx + 1}. {p['name']:<30} | Max Wind: {p['max_speed']:>4} kts (Gust: {p['max_gust']:>4} kts) | Dir: {p['dir']:<3} | {p['condition']:<15} {marker}")
     print("="*70)
     
-    # 3. Select park
-    park_choice = input_with_timeout(f"\nSelect a park to reserve (1-{len(ranked_parks)}) [default: 1]: ", timeout=45, default="1").strip()
-    if not park_choice:
-        park_choice = 1
+    selected_park = None
+    if target_park_override:
+        for p in ranked_parks:
+            if target_park_override.lower() in p["name"].lower():
+                selected_park = p
+                break
+        if not selected_park:
+            print(f"Error: Overridden park name '{target_park_override}' could not be matched!")
+            sys.exit(1)
     else:
-        try:
-            park_choice = int(park_choice)
-            if park_choice < 1 or park_choice > len(ranked_parks):
-                park_choice = 1
-        except ValueError:
+        park_choice = input_with_timeout(f"\nSelect a park to reserve (1-{len(ranked_parks)}) [default: 1]: ", timeout=45, default="1").strip()
+        if not park_choice:
             park_choice = 1
-            
-    selected_park = ranked_parks[park_choice - 1]
+        else:
+            try:
+                park_choice = int(park_choice)
+                if park_choice < 1 or park_choice > len(ranked_parks):
+                    park_choice = 1
+            except ValueError:
+                park_choice = 1
+        selected_park = ranked_parks[park_choice - 1]
+        
     park_name = selected_park["name"]
     park_search_name = PARKS[park_name]["search_name"]
     
-    # Update config previously selected park
     config["previously_selected_park"] = park_name
     save_config(config)
     
     print(f"\nProceeding to book {park_name} for {target_date_str}.")
     
-    # 4. Playwright Automation
     print("\nLaunching browser to automate reservations.ontarioparks.ca...")
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=is_headless)
         context = browser.new_context(viewport={"width": 1280, "height": 800})
         page = context.new_page()
         
@@ -437,12 +734,10 @@ def main():
         page.goto("https://reservations.ontarioparks.ca/", timeout=40000)
         page.wait_for_load_state("networkidle")
         
-        # Click on Day Use tab link
         print("Opening Day Use section...")
         page.click("#mat-tab-link-1")
         time.sleep(1)
         
-        # Fill in the park
         print(f"Searching for park: '{park_search_name}'...")
         page.fill("#park-autocomplete-input", park_search_name)
         time.sleep(2)
@@ -451,32 +746,26 @@ def main():
         page.press("#park-autocomplete-input", "Enter")
         time.sleep(1)
         
-        # Select Date
         print("Selecting date in calendar...")
         page.click("#arrival-date-field")
         time.sleep(2)
-        # Format label: 'June 27, 2026'
         date_label = f"{target_date.strftime('%B')} {target_date.day}, {target_date.year}"
         page.click(f"[aria-label='{date_label}']")
         time.sleep(1)
         
-        # Search
         print("Submitting search...")
         page.click("#actionSearch")
         time.sleep(5)
         
-        # Consent modal check
         consent_btn = page.locator("#consentButton")
         if consent_btn.count() > 0 and consent_btn.is_visible():
             print("Accepting rules consent...")
             consent_btn.click()
             time.sleep(2)
             
-        # Grid Cell Selection
-        # Row 0 cells contain target date short name (e.g. 'Jun 27')
         print("Locating available slot cell...")
         headers = page.locator("table.chart tr").first.locator("td, th").all()
-        target_col_text = target_date.strftime("%b %d") # e.g. 'Jun 27'
+        target_col_text = target_date.strftime("%b %d")
         col_index = -1
         for idx, h in enumerate(headers):
             text = h.inner_text().strip()
@@ -503,87 +792,61 @@ def main():
         cell.click()
         time.sleep(2)
         
-        # Click Reserve Button
         print("Clicking Reserve...")
         page.click("#reserveButton")
         time.sleep(4)
+        page.wait_for_load_state("networkidle")
         
-        # Login prompt
-        print("\n" + "*"*80)
-        print("⚠️ ACTION REQUIRED: If you are not signed in, please log in to your Ontario Parks")
-        print("account now in the opened browser window.")
-        print("Once you are signed in and see the 'Additional Information' page, press Enter here.")
-        print("*"*80)
-        input_with_timeout("\nPress Enter to continue after logging in (Timeout in 180s)...", timeout=180, default="")
+        password = config.get("ontario_parks_password")
+        if is_headless and not password:
+            print("Error: Headless run selected, but 'ontario_parks_password' is not configured!")
+            browser.close()
+            sys.exit(1)
+            
+        if password:
+            login_to_ontario_parks(page, config["email"], password)
+        else:
+            print("\n" + "*"*80)
+            print("⚠️ ACTION REQUIRED: If you are not signed in, please log in to your Ontario Parks")
+            print("account now in the opened browser window.")
+            print("Once you are signed in and see the checkout wizard or additional info page, press Enter here.")
+            print("*"*80)
+            input_with_timeout("\nPress Enter to continue after logging in (Timeout in 180s)...", timeout=180, default="")
+            
+        run_checkout_wizard(page, config)
         
-        # Now fill in vehicle and permit details
-        print("\nFilling Additional Information fields...")
+        print("Wizard Completed. Running preregistration automation...")
         try:
-            # 1. Choose Seasonal Vehicle Permit Holder option
-            # Look for radio button containing the text
-            page.locator("text=Seasonal Vehicle Permit Holder").first.click()
-            time.sleep(1)
-            
-            # 2. Enter permit number S-2632347
-            # Locator: search input next to label, or with formcontrolname
-            permit_input = page.locator("input[placeholder*='Pass'], input[id*='pass'], input[formcontrolname*='pass'], input[id*='Pass']")
-            if permit_input.count() > 0:
-                permit_input.first.fill(config["permit_number"])
-                print(" - Filled permit number:", config["permit_number"])
-            
-            # 3. Enter License Plate
-            plate_input = page.locator("input[placeholder*='Plate'], input[id*='plate'], input[formcontrolname*='plate'], input[formcontrolname*='LicensePlate']")
-            if plate_input.count() > 0:
-                plate_input.first.fill(config["vehicle_plate"])
-                print(" - Filled license plate:", config["vehicle_plate"])
+            preregister_btn = page.locator("button:has-text('Preregister'), a:has-text('Preregister')")
+            if preregister_btn.count() > 0 and preregister_btn.first.is_visible():
+                preregister_btn.first.click()
+                time.sleep(4)
+                page.wait_for_load_state("networkidle")
                 
-            # 4. Enter Province
-            province_input = page.locator("input[placeholder*='Province'], input[id*='province'], input[formcontrolname*='province'], input[formcontrolname*='Province']")
-            if province_input.count() > 0:
-                # If it's a input field
-                province_input.first.fill(config["vehicle_province"])
-                print(" - Filled province:", config["vehicle_province"])
-            
-            # Let's wait a second to make sure inputs are registered
-            time.sleep(1)
-            
-            # Click green Confirm Additional Information button
-            # Class: .raised-btn, .mat-primary, or text contains 'Confirm'
-            confirm_btn = page.locator("button:has-text('Confirm additional information'), button:has-text('Confirm')")
-            if confirm_btn.count() > 0:
-                print("Clicking confirm button...")
-                confirm_btn.first.click()
-                time.sleep(3)
+                preregister_now_btn = page.locator("button:has-text('Preregister now')")
+                if preregister_now_btn.count() > 0 and preregister_now_btn.first.is_visible():
+                    preregister_now_btn.first.click()
+                    time.sleep(4)
+                    page.wait_for_load_state("networkidle")
+                    print("Successfully Preregistered vehicle plate!")
         except Exception as e:
-            print("Warning: Automation autofill encountered an issue:", e)
-            print("Please fill in the details manually in the browser, then continue.")
+            print("Warning: Preregistration failed with issue:", e)
             
-        print("\n" + "*"*80)
-        print("⚠️ ACTION REQUIRED: Please review the final page in the browser (cart charge should be $0.00).")
-        print("Click 'Checkout' / 'Confirm' button in the browser to complete the booking.")
-        print("Once you see the reservation confirmation screen (with the Reservation Number), press Enter here.")
-        print("*"*80)
-        input_with_timeout("\nPress Enter to continue after checkout completion (Timeout in 180s)...", timeout=180, default="")
-        
-        # Capture confirmation number
         print("\nScanning page for reservation number...")
         conf_number = "Unknown"
         page_text = page.locator("body").inner_text()
         
-        # Try to search for Reservation Number formats (e.g. OP-XXXXXX or numbers)
         import re
-        match = re.search(r"OP-\d+", page_text)
+        match = re.search(r"INOP\d+-\d+|INOP\d+-[A-Z0-9]+|OP-\d+", page_text)
         if match:
             conf_number = match.group(0)
             print(f"Captured confirmation number: {conf_number}")
         else:
-            # Look for any pattern in URL or other places
             match_any = re.search(r"Reservation\s*(?:Number|#)?\s*:?\s*([A-Z0-9\-]+)", page_text, re.IGNORECASE)
             if match_any:
                 conf_number = match_any.group(1).strip()
                 print(f"Captured confirmation number: {conf_number}")
                 
-        # Take confirmation screenshot
         screenshot_name = f"confirmation_{target_date_str}_{conf_number.replace('-', '_')}.png"
         screenshot_path = os.path.join(os.path.dirname(__file__), screenshot_name)
         page.screenshot(path=screenshot_path)
@@ -591,7 +854,6 @@ def main():
         
         browser.close()
         
-    # 5. Gmail confirmation check
     email_verified = "No (skipped or not found)"
     if config.get("gmail_app_password"):
         print("\nWaiting 15 seconds for Ontario Parks to send email receipt...")
@@ -600,7 +862,6 @@ def main():
         if email_body:
             email_verified = "Yes"
             
-    # 6. Telegram notification
     msg_text = (
         f"🌊 <b>Ontario Park Reservation Confirmed!</b> 🌊\n\n"
         f"📍 <b>Park:</b> {park_name}\n"
