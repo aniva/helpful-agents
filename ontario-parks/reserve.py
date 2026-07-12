@@ -486,7 +486,6 @@ def run_checkout_wizard(page, config):
         time.sleep(2)
 
 def list_reservations(email_user, password, headless=True):
-    print(f"Debug list_reservations loaded: email='{email_user}', password_len={len(password) if password else 0}")
     print("Launching browser to list reservations...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
@@ -510,9 +509,6 @@ def list_reservations(email_user, password, headless=True):
         time.sleep(3)
         
         page_text = page.locator("body").inner_text()
-        print(f"Debug My Reservations Page: URL={page.url}, Title={page.title()}, Text length={len(page_text)}")
-        if len(page_text) > 0:
-            print("Text snippet:", page_text[:200].replace('\n', ' '))
         
         import re
         reservations = []
