@@ -331,31 +331,48 @@ def check_gmail_confirmation(email_user, app_password, date_str):
         print(f"Error checking email: {e}")
         return None
 
+def dismiss_cookie_consent(page):
+    try:
+        # Check for consent button for up to 5 seconds
+        consent_btn = page.locator("button:has-text('I consent'), button:has-text('I Consent'), button#consentButton")
+        for _ in range(5):
+            if consent_btn.count() > 0 and consent_btn.first.is_visible():
+                print("Clicking cookie consent banner...")
+                consent_btn.first.click()
+                time.sleep(1.5)
+                break
+            time.sleep(1)
+    except Exception:
+        pass
+
 def login_to_ontario_parks(page, email_user, password):
-    print("Navigating to sign in page...")
-    page.goto("https://reservations.ontarioparks.ca/sign-in", timeout=40000)
-    page.wait_for_load_state("networkidle")
-    time.sleep(2)
+    print("Navigating to homepage first...")
+    page.goto("https://reservations.ontarioparks.ca/", timeout=40000)
+    time.sleep(3)
     
-    email_input = page.locator("input[type='email'], input[id*='email'], input[formcontrolname='email']")
-    if email_input.count() > 0 and email_input.first.is_visible():
-        print(f"Signing in as {email_user}...")
-        email_input.first.fill(email_user)
+    consent_btn = page.locator("button:has-text('I consent'), button:has-text('I Consent')")
+    if consent_btn.count() > 0:
+        consent_btn.first.click()
         time.sleep(1)
         
-        password_input = page.locator("input[type='password'], input[id*='password'], input[formcontrolname='password']")
-        if password_input.count() > 0:
-            password_input.first.fill(password)
-            time.sleep(1)
-            
-        sign_in_btn = page.locator("button:has-text('Sign in'), button:has-text('Sign In')")
-        if sign_in_btn.count() > 0:
-            sign_in_btn.first.click()
-            print("Submitted credentials, waiting for navigation...")
-            time.sleep(5)
-            page.wait_for_load_state("networkidle")
-    else:
-        print("Already signed in or credentials form not found.")
+    print("Navigating to login page...")
+    page.goto("https://reservations.ontarioparks.ca/login", timeout=40000)
+    time.sleep(3)
+    
+    # Click consent if present again
+    consent_btn = page.locator("button:has-text('I consent'), button:has-text('I Consent')")
+    if consent_btn.count() > 0:
+        consent_btn.first.click()
+        time.sleep(1)
+        
+    print("Submitting credentials...")
+    page.locator("input#email").first.fill(email_user)
+    page.locator("input#password").first.fill(password)
+    page.locator("#loginButton").first.click()
+    
+    print("Submitted credentials, waiting for navigation...")
+    time.sleep(6)
+    page.wait_for_load_state("networkidle")
 
 def run_checkout_wizard(page, config):
     """
@@ -469,20 +486,33 @@ def run_checkout_wizard(page, config):
         time.sleep(2)
 
 def list_reservations(email_user, password, headless=True):
+    print(f"Debug list_reservations loaded: email='{email_user}', password_len={len(password) if password else 0}")
     print("Launching browser to list reservations...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        context = browser.new_context(
+            user_agent=user_agent,
+            viewport={"width": 1280, "height": 800},
+            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
+        )
         page = context.new_page()
+        page.add_init_script("delete navigator.__proto__.webdriver;")
         
         login_to_ontario_parks(page, email_user, password)
         
         print("Navigating to My Reservations...")
         page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
-        page.wait_for_load_state("networkidle")
+        try:
+            page.locator("text=My Reservations, text=Upcoming").first.wait_for(state="visible", timeout=12000)
+        except Exception:
+            pass
         time.sleep(3)
         
         page_text = page.locator("body").inner_text()
+        print(f"Debug My Reservations Page: URL={page.url}, Title={page.title()}, Text length={len(page_text)}")
+        if len(page_text) > 0:
+            print("Text snippet:", page_text[:200].replace('\n', ' '))
         
         import re
         reservations = []
@@ -524,14 +554,23 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
     print(f"Launching browser to cancel reservation {target_res_num}...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        context = browser.new_context(
+            user_agent=user_agent,
+            viewport={"width": 1280, "height": 800},
+            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
+        )
         page = context.new_page()
+        page.add_init_script("delete navigator.__proto__.webdriver;")
         
         login_to_ontario_parks(page, email_user, password)
         
         print("Navigating to My Reservations...")
         page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
-        page.wait_for_load_state("networkidle")
+        try:
+            page.locator("text=My Reservations, text=Upcoming").first.wait_for(state="visible", timeout=12000)
+        except Exception:
+            pass
         time.sleep(3)
         
         # Locate card containing the target reservation number
@@ -755,12 +794,25 @@ def main():
     print("\nLaunching browser to automate reservations.ontarioparks.ca...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=is_headless)
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        context = browser.new_context(
+            user_agent=user_agent,
+            viewport={"width": 1280, "height": 800},
+            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
+        )
         page = context.new_page()
+        page.add_init_script("delete navigator.__proto__.webdriver;")
         
         print("Navigating to homepage...")
         page.goto("https://reservations.ontarioparks.ca/", timeout=40000)
         page.wait_for_load_state("networkidle")
+        
+        # Handle cookie consent overlay if present
+        consent_btn = page.locator("button:has-text('I consent'), button:has-text('I Consent')")
+        if consent_btn.count() > 0:
+            print("Handling cookie consent banner...")
+            consent_btn.first.click()
+            time.sleep(2)
         
         print("Opening Day Use section...")
         page.click("#mat-tab-link-1")
