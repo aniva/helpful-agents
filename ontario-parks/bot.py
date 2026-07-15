@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import threading
+import datetime
 
 # Add current dir to path to import reserve
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +38,48 @@ def format_reservations_html():
         
     return "\n".join(html_lines)
 
+def send_telegram_keyboard(token, chat_id, text, keyboard):
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "reply_markup": keyboard
+    }
+    try:
+        res = requests.post(url, json=payload, timeout=10)
+        return res.status_code == 200
+    except Exception as e:
+        print(f"Error sending keyboard: {e}")
+        return False
+
+def edit_telegram_keyboard(token, chat_id, message_id, text, keyboard=None):
+    url = f"https://api.telegram.org/bot{token}/editMessageText"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    if keyboard is not None:
+        payload["reply_markup"] = keyboard
+    try:
+        res = requests.post(url, json=payload, timeout=10)
+        return res.status_code == 200
+    except Exception as e:
+        print(f"Error editing keyboard: {e}")
+        return False
+
+def answer_callback_query(token, callback_query_id):
+    url = f"https://api.telegram.org/bot{token}/answerCallbackQuery"
+    payload = {
+        "callback_query_id": callback_query_id
+    }
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception:
+        pass
+
 def list_task():
     try:
         # Send status update
@@ -55,14 +98,12 @@ def list_task():
 
 def book_task(park, date):
     try:
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to book <b>{park}</b> for <b>{date}</b>...")
-        
         # Run subprocess
         res = subprocess.run([sys.executable, "reserve.py", "book", "--park", park, "--date", date, "--headless", "true"], capture_output=True, text=True)
         if res.returncode == 0:
             reply = "✅ <b>Booking process completed successfully!</b>"
         else:
-            reply = f"❌ <b>Booking failed:</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
+            reply = f"❌ <b>Booking failed for {park} ({date}):</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
             
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
     except Exception as e:
@@ -94,20 +135,19 @@ def handle_command(command_text):
         threading.Thread(target=list_task, daemon=True).start()
         
     elif cmd == "/book":
-        if len(args) < 2:
-            send_telegram_message(config["telegram_token"], config["telegram_chat_id"], "Usage: `/book [Park Name] [Date]`")
-            return
-        
-        # Determine if last argument is the date
-        last_arg = args[-1].lower()
-        if last_arg in ["today", "tomorrow", "day_after"] or len(last_arg.split("-")) == 3:
-            park = " ".join(args[1:-1])
-            date = last_arg
-        else:
-            park = " ".join(args[1:])
-            date = "tomorrow"
-            
-        threading.Thread(target=book_task, args=(park, date), daemon=True).start()
+        # Launch interactive park selection keyboard
+        parks_keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "🌲 Sibbald Point", "callback_data": "park:Sibbald Point"},
+                    {"text": "🌲 Presqu'ile", "callback_data": "park:Presqu'ile"}
+                ],
+                [
+                    {"text": "🌲 Wasaga Beach (Area 6)", "callback_data": "park:Wasaga Beach 6"}
+                ]
+            ]
+        }
+        send_telegram_keyboard(config["telegram_token"], config["telegram_chat_id"], "🌲 <b>Ontario Parks Booking Wizard</b>\nSelect a park to book:", parks_keyboard)
         
     elif cmd == "/cancel":
         if len(args) < 2:
@@ -121,12 +161,81 @@ def handle_command(command_text):
             "🤖 <b>AnivaWay Bot Help Menu:</b>\n\n"
             "📋 <b>Commands:</b>\n"
             "• `/list` - List all active reservations.\n"
-            "• `/book [Park] [Date]` - Book a day-use permit (defaults to tomorrow).\n"
-            "  <i>Example:</i> <code>/book Sibbald Point tomorrow</code>\n"
+            "• `/book` - Start interactive day-use booking wizard.\n"
             "• `/cancel [Reservation ID]` - Cancel a specific booking.\n"
             "  <i>Example:</i> <code>/cancel INOP26-7139739B1</code>"
         )
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
+
+def handle_callback(callback_query):
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    query_id = callback_query["id"]
+    message_id = callback_query["message"]["message_id"]
+    data = callback_query["data"]
+    
+    answer_callback_query(token, query_id)
+    
+    if data.startswith("park:"):
+        park_name = data.split(":", 1)[1]
+        
+        # Calculate dynamic date options
+        today_dt = datetime.date.today()
+        tomorrow_dt = today_dt + datetime.timedelta(days=1)
+        day_after_dt = today_dt + datetime.timedelta(days=2)
+        in_3_days_dt = today_dt + datetime.timedelta(days=3)
+        
+        today_label = f"Today ({today_dt.strftime('%a')})"
+        tomorrow_label = f"Tomorrow ({tomorrow_dt.strftime('%a')})"
+        day_after_label = f"Day After ({day_after_dt.strftime('%a')})"
+        in_3_days_label = f"In 3 Days ({in_3_days_dt.strftime('%a')})"
+        
+        dates_keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": today_label, "callback_data": f"book_btn:{park_name}|today"},
+                    {"text": tomorrow_label, "callback_data": f"book_btn:{park_name}|tomorrow"}
+                ],
+                [
+                    {"text": day_after_label, "callback_data": f"book_btn:{park_name}|day_after"},
+                    {"text": in_3_days_label, "callback_data": f"book_btn:{park_name}|{in_3_days_dt.strftime('%Y-%m-%d')}"}
+                ],
+                [
+                    {"text": "❌ Cancel Wizard", "callback_data": "cancel_wizard"}
+                ]
+            ]
+        }
+        
+        edit_telegram_keyboard(
+            token, chat_id, message_id, 
+            f"📅 <b>Select a Date for {park_name}:</b>", 
+            dates_keyboard
+        )
+        
+    elif data.startswith("book_btn:"):
+        payload = data.split(":", 1)[1]
+        park_name, date_val = payload.split("|", 1)
+        
+        # Format user-friendly date text
+        date_label = date_val
+        if date_val == "today":
+            date_label = "today"
+        elif date_val == "tomorrow":
+            date_label = "tomorrow"
+        elif date_val == "day_after":
+            date_label = "day after tomorrow"
+            
+        # Update UI to final status and remove keyboard
+        edit_telegram_keyboard(
+            token, chat_id, message_id, 
+            f"⏳ Attempting to book <b>{park_name}</b> for <b>{date_label}</b>..."
+        )
+        
+        # Start booking background thread
+        threading.Thread(target=book_task, args=(park_name, date_val), daemon=True).start()
+        
+    elif data == "cancel_wizard":
+        edit_telegram_keyboard(token, chat_id, message_id, "❌ <i>Booking wizard closed.</i>")
 
 def main():
     global config
@@ -150,12 +259,22 @@ def main():
                 result = response.json().get("result", [])
                 for update in result:
                     offset = update["update_id"] + 1
+                    
+                    # Handle normal commands
                     message = update.get("message")
                     if message and str(message["chat"]["id"]) == CHAT_ID:
                         text = message.get("text", "")
                         if text.startswith("/"):
                             print(f"Received command: {text}")
                             handle_command(text)
+                            
+                    # Handle keyboard selections
+                    callback_query = update.get("callback_query")
+                    if callback_query:
+                        chat_id = str(callback_query["message"]["chat"]["id"])
+                        if chat_id == CHAT_ID:
+                            handle_callback(callback_query)
+                            
         except Exception as e:
             print(f"Error in polling: {e}")
         time.sleep(1)
