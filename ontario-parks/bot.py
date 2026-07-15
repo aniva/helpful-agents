@@ -29,7 +29,7 @@ def format_reservations_html():
         line = (
             f"<b>{idx}. {r['park']}</b>\n"
             f"📅 <b>Date:</b> {r['date']}\n"
-            f"🎫 <b>Num:</b> <a href='https://reservations.ontarioparks.ca/account/all-bookings'><code>{r['reservation_number']}</code></a>\n"
+            f'🎫 <b>Num:</b> <a href="https://reservations.ontarioparks.ca/account/all-bookings"><code>{r["reservation_number"]}</code></a>\n'
             f"🚗 <b>Vehicle:</b> {r['vehicle']} ({r['occupant']})\n"
             f"───────────────────"
         )
