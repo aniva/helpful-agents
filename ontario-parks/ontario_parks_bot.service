@@ -1,0 +1,14 @@
+[Unit]
+Description=Ontario Parks Telegram Booking Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/me/ontario-parks
+ExecStart=/home/me/ontario-parks/.venv/bin/python /home/me/ontario-parks/bot.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
