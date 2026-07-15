@@ -4,6 +4,7 @@ import requests
 import json
 import os
 import sys
+import threading
 
 # Add current dir to path to import reserve
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -36,24 +37,66 @@ def format_reservations_html():
         
     return "\n".join(html_lines)
 
+def list_task():
+    try:
+        # Send status update
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], "🔍 Checking active reservations...")
+        
+        # Run subprocess
+        res = subprocess.run([sys.executable, "reserve.py", "list"], capture_output=True, text=True)
+        if res.returncode == 0:
+            reply = format_reservations_html()
+        else:
+            reply = f"❌ <b>Failed to list reservations:</b>\n<pre>{res.stdout[-300:] or res.stderr[-300:]}</pre>"
+        
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
+    except Exception as e:
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ Error: {e}")
+
+def book_task(park, date):
+    try:
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to book <b>{park}</b> for <b>{date}</b>...")
+        
+        # Run subprocess
+        res = subprocess.run([sys.executable, "reserve.py", "book", "--park", park, "--date", date, "--headless", "true"], capture_output=True, text=True)
+        if res.returncode == 0:
+            reply = "✅ <b>Booking process completed successfully!</b>"
+        else:
+            reply = f"❌ <b>Booking failed:</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
+            
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
+    except Exception as e:
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ Error: {e}")
+
+def cancel_task(res_num):
+    try:
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to cancel reservation <code>{res_num}</code>...")
+        
+        # Run subprocess
+        res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true"], capture_output=True, text=True)
+        if res.returncode == 0:
+            reply = f"✅ <b>Reservation <code>{res_num}</code> has been successfully cancelled!</b>"
+        else:
+            reply = f"❌ <b>Cancellation failed:</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
+            
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
+    except Exception as e:
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ Error: {e}")
+
 def handle_command(command_text):
     args = command_text.split()
     if not args:
-        return None
+        return
         
     cmd = args[0].lower().split("@")[0] # Strip bot username if present (e.g. /list@AnivaWayBot)
     
     if cmd == "/list":
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], "🔍 Checking active reservations...")
-        res = subprocess.run([sys.executable, "reserve.py", "list"], capture_output=True, text=True)
-        if res.returncode == 0:
-            return format_reservations_html()
-        else:
-            return f"❌ <b>Failed to list reservations:</b>\n<pre>{res.stdout[-300:] or res.stderr[-300:]}</pre>"
+        threading.Thread(target=list_task, daemon=True).start()
         
     elif cmd == "/book":
         if len(args) < 2:
-            return "Usage: `/book [Park Name] [Date (today|tomorrow|day_after|YYYY-MM-DD)]`"
+            send_telegram_message(config["telegram_token"], config["telegram_chat_id"], "Usage: `/book [Park Name] [Date]`")
+            return
         
         # Determine if last argument is the date
         last_arg = args[-1].lower()
@@ -64,26 +107,17 @@ def handle_command(command_text):
             park = " ".join(args[1:])
             date = "tomorrow"
             
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to book <b>{park}</b> for <b>{date}</b>...")
-        res = subprocess.run([sys.executable, "reserve.py", "book", "--park", park, "--date", date, "--headless", "true"], capture_output=True, text=True)
-        if res.returncode == 0:
-            return "✅ <b>Booking process completed successfully!</b>"
-        else:
-            return f"❌ <b>Booking failed:</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
+        threading.Thread(target=book_task, args=(park, date), daemon=True).start()
         
     elif cmd == "/cancel":
         if len(args) < 2:
-            return "Usage: `/cancel [Reservation Number]`"
+            send_telegram_message(config["telegram_token"], config["telegram_chat_id"], "Usage: `/cancel [Reservation Number]`")
+            return
         res_num = args[1]
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to cancel reservation <code>{res_num}</code>...")
-        res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true"], capture_output=True, text=True)
-        if res.returncode == 0:
-            return f"✅ <b>Reservation <code>{res_num}</code> has been successfully cancelled!</b>"
-        else:
-            return f"❌ <b>Cancellation failed:</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
-            
+        threading.Thread(target=cancel_task, args=(res_num,), daemon=True).start()
+        
     elif cmd in ["/help", "/start"]:
-        return (
+        reply = (
             "🤖 <b>AnivaWay Bot Help Menu:</b>\n\n"
             "📋 <b>Commands:</b>\n"
             "• `/list` - List all active reservations.\n"
@@ -92,8 +126,7 @@ def handle_command(command_text):
             "• `/cancel [Reservation ID]` - Cancel a specific booking.\n"
             "  <i>Example:</i> <code>/cancel INOP26-7139739B1</code>"
         )
-        
-    return None
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
 
 def main():
     global config
@@ -122,9 +155,7 @@ def main():
                         text = message.get("text", "")
                         if text.startswith("/"):
                             print(f"Received command: {text}")
-                            reply = handle_command(text)
-                            if reply:
-                                send_telegram_message(TOKEN, CHAT_ID, reply)
+                            handle_command(text)
         except Exception as e:
             print(f"Error in polling: {e}")
         time.sleep(1)
