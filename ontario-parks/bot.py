@@ -6,6 +6,7 @@ import os
 import sys
 import threading
 import datetime
+import calendar
 
 # Add current dir to path to import reserve
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -80,6 +81,91 @@ def answer_callback_query(token, callback_query_id):
     except Exception:
         pass
 
+def create_calendar_keyboard(park_name, year, month):
+    # Calculate next and prev month
+    prev_month = month - 1
+    prev_year = year
+    if prev_month == 0:
+        prev_month = 12
+        prev_year -= 1
+        
+    next_month = month + 1
+    next_year = year
+    if next_month == 13:
+        next_month = 1
+        next_year += 1
+        
+    month_name = calendar.month_name[month]
+    
+    keyboard = {
+        "inline_keyboard": [
+            # Header Row
+            [
+                {"text": "◀️", "callback_data": f"cal_month:{park_name}|{prev_year}-{prev_month:02d}"},
+                {"text": f"📅 {month_name} {year}", "callback_data": "cal_ignore"},
+                {"text": "▶️", "callback_data": f"cal_month:{park_name}|{next_year}-{next_month:02d}"}
+            ],
+            # Weekdays Row
+            [
+                {"text": "M", "callback_data": "cal_ignore"},
+                {"text": "T", "callback_data": "cal_ignore"},
+                {"text": "W", "callback_data": "cal_ignore"},
+                {"text": "T", "callback_data": "cal_ignore"},
+                {"text": "F", "callback_data": "cal_ignore"},
+                {"text": "S", "callback_data": "cal_ignore"},
+                {"text": "S", "callback_data": "cal_ignore"}
+            ]
+        ]
+    }
+    
+    # Days Grid
+    cal = calendar.monthcalendar(year, month)
+    for week in cal:
+        row = []
+        for day in week:
+            if day == 0:
+                row.append({"text": " ", "callback_data": "cal_ignore"})
+            else:
+                date_str = f"{year}-{month:02d}-{day:02d}"
+                row.append({"text": str(day), "callback_data": f"book_btn:{park_name}|{date_str}"})
+        keyboard["inline_keyboard"].append(row)
+        
+    # Navigation/Back Row
+    keyboard["inline_keyboard"].append([
+        {"text": "🔙 Back to Quick Dates", "callback_data": f"back_to_quick:{park_name}"}
+    ])
+    
+    return keyboard
+
+def get_quick_dates_keyboard(park_name):
+    today_dt = datetime.date.today()
+    tomorrow_dt = today_dt + datetime.timedelta(days=1)
+    day_after_dt = today_dt + datetime.timedelta(days=2)
+    in_3_days_dt = today_dt + datetime.timedelta(days=3)
+    
+    today_label = f"Today ({today_dt.strftime('%a')})"
+    tomorrow_label = f"Tomorrow ({tomorrow_dt.strftime('%a')})"
+    day_after_label = f"Day After ({day_after_dt.strftime('%a')})"
+    in_3_days_label = f"In 3 Days ({in_3_days_dt.strftime('%a')})"
+    
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": today_label, "callback_data": f"book_btn:{park_name}|today"},
+                {"text": tomorrow_label, "callback_data": f"book_btn:{park_name}|tomorrow"}
+            ],
+            [
+                {"text": day_after_label, "callback_data": f"book_btn:{park_name}|day_after"},
+                {"text": in_3_days_label, "callback_data": f"book_btn:{park_name}|{in_3_days_dt.strftime('%Y-%m-%d')}"}
+            ],
+            [
+                {"text": "📅 Select from Calendar", "callback_data": f"show_calendar:{park_name}"},
+                {"text": "❌ Cancel Wizard", "callback_data": "cancel_wizard"}
+            ]
+        ]
+    }
+    return keyboard
+
 def list_task():
     try:
         # Send status update
@@ -135,7 +221,6 @@ def handle_command(command_text):
         threading.Thread(target=list_task, daemon=True).start()
         
     elif cmd == "/book":
-        # Launch interactive park selection keyboard
         parks_keyboard = {
             "inline_keyboard": [
                 [
@@ -176,40 +261,46 @@ def handle_callback(callback_query):
     
     answer_callback_query(token, query_id)
     
-    if data.startswith("park:"):
+    if data == "cal_ignore":
+        return
+        
+    elif data.startswith("park:"):
         park_name = data.split(":", 1)[1]
-        
-        # Calculate dynamic date options
-        today_dt = datetime.date.today()
-        tomorrow_dt = today_dt + datetime.timedelta(days=1)
-        day_after_dt = today_dt + datetime.timedelta(days=2)
-        in_3_days_dt = today_dt + datetime.timedelta(days=3)
-        
-        today_label = f"Today ({today_dt.strftime('%a')})"
-        tomorrow_label = f"Tomorrow ({tomorrow_dt.strftime('%a')})"
-        day_after_label = f"Day After ({day_after_dt.strftime('%a')})"
-        in_3_days_label = f"In 3 Days ({in_3_days_dt.strftime('%a')})"
-        
-        dates_keyboard = {
-            "inline_keyboard": [
-                [
-                    {"text": today_label, "callback_data": f"book_btn:{park_name}|today"},
-                    {"text": tomorrow_label, "callback_data": f"book_btn:{park_name}|tomorrow"}
-                ],
-                [
-                    {"text": day_after_label, "callback_data": f"book_btn:{park_name}|day_after"},
-                    {"text": in_3_days_label, "callback_data": f"book_btn:{park_name}|{in_3_days_dt.strftime('%Y-%m-%d')}"}
-                ],
-                [
-                    {"text": "❌ Cancel Wizard", "callback_data": "cancel_wizard"}
-                ]
-            ]
-        }
-        
+        keyboard = get_quick_dates_keyboard(park_name)
         edit_telegram_keyboard(
             token, chat_id, message_id, 
             f"📅 <b>Select a Date for {park_name}:</b>", 
-            dates_keyboard
+            keyboard
+        )
+        
+    elif data.startswith("show_calendar:"):
+        park_name = data.split(":", 1)[1]
+        today_dt = datetime.date.today()
+        keyboard = create_calendar_keyboard(park_name, today_dt.year, today_dt.month)
+        edit_telegram_keyboard(
+            token, chat_id, message_id,
+            f"📅 <b>Select a Date for {park_name}:</b>",
+            keyboard
+        )
+        
+    elif data.startswith("cal_month:"):
+        payload = data.split(":", 1)[1]
+        park_name, date_parts = payload.split("|", 1)
+        year, month = map(int, date_parts.split("-"))
+        keyboard = create_calendar_keyboard(park_name, year, month)
+        edit_telegram_keyboard(
+            token, chat_id, message_id,
+            f"📅 <b>Select a Date for {park_name}:</b>",
+            keyboard
+        )
+        
+    elif data.startswith("back_to_quick:"):
+        park_name = data.split(":", 1)[1]
+        keyboard = get_quick_dates_keyboard(park_name)
+        edit_telegram_keyboard(
+            token, chat_id, message_id,
+            f"📅 <b>Select a Date for {park_name}:</b>",
+            keyboard
         )
         
     elif data.startswith("book_btn:"):
@@ -225,13 +316,10 @@ def handle_callback(callback_query):
         elif date_val == "day_after":
             date_label = "day after tomorrow"
             
-        # Update UI to final status and remove keyboard
         edit_telegram_keyboard(
             token, chat_id, message_id, 
             f"⏳ Attempting to book <b>{park_name}</b> for <b>{date_label}</b>..."
         )
-        
-        # Start booking background thread
         threading.Thread(target=book_task, args=(park_name, date_val), daemon=True).start()
         
     elif data == "cancel_wizard":
