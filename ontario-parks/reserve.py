@@ -367,9 +367,18 @@ def login_to_ontario_parks(page, email_user, password):
         
     print("Navigating to login page...")
     page.goto("https://reservations.ontarioparks.ca/login", timeout=40000)
-    time.sleep(3)
     
-    if "account" in page.url:
+    # Wait for either input#email OR redirect to /account
+    is_logged_in = False
+    for _ in range(30):
+        if "account" in page.url:
+            is_logged_in = True
+            break
+        if page.locator("input#email").count() > 0 and page.locator("input#email").first.is_visible():
+            break
+        time.sleep(0.5)
+        
+    if is_logged_in or "account" in page.url:
         print("Already logged in (redirected to account).")
         return
     
