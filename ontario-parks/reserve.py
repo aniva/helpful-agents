@@ -369,6 +369,10 @@ def login_to_ontario_parks(page, email_user, password):
     page.goto("https://reservations.ontarioparks.ca/login", timeout=40000)
     time.sleep(3)
     
+    if "account" in page.url:
+        print("Already logged in (redirected to account).")
+        return
+    
     # Click consent if present again
     consent_btn = page.locator("button:has-text('I consent'), button:has-text('I Consent')")
     if consent_btn.count() > 0:
