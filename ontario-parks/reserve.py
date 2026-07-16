@@ -404,12 +404,13 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
                 continue
 
         # 1. Review Reservation Details checkbox + confirm (Screenshot 3)
-        review_chk = page.locator("mat-checkbox:has-text('details are correct'), mat-checkbox")
+        review_chk_parent = page.locator("mat-checkbox:has-text('details are correct'), mat-checkbox")
+        review_chk_input = page.locator("mat-checkbox:has-text('details are correct') input, mat-checkbox input")
         review_btn = page.locator("button:has-text('Confirm reservation details')")
         if review_btn.count() > 0 and review_btn.first.is_visible():
             print("Wizard: Confirming reservation details...")
-            if review_chk.count() > 0 and not review_chk.first.is_checked():
-                review_chk.first.click()
+            if review_chk_input.count() > 0 and not review_chk_input.first.is_checked():
+                review_chk_parent.first.click()
                 time.sleep(1)
             if request_approval_callback:
                 screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_1.png")
@@ -442,12 +443,13 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
             continue
             
         # 3. Policies Checkbox & Acknowledgement (Screenshot 6)
-        policies_chk = page.locator("mat-checkbox:has-text('agree'), mat-checkbox")
+        policies_chk_parent = page.locator("mat-checkbox:has-text('agree'), mat-checkbox")
+        policies_chk_input = page.locator("mat-checkbox:has-text('agree') input, mat-checkbox input")
         policies_btn = page.locator("button:has-text('Confirm acknowledgements')")
         if policies_btn.count() > 0 and policies_btn.first.is_visible():
             print("Wizard: Confirming policies acknowledgements...")
-            if policies_chk.count() > 0 and not policies_chk.first.is_checked():
-                policies_chk.first.click()
+            if policies_chk_input.count() > 0 and not policies_chk_input.first.is_checked():
+                policies_chk_parent.first.click()
                 time.sleep(1)
             if request_approval_callback:
                 screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_3.png")
