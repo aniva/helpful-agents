@@ -380,6 +380,17 @@ def run_checkout_wizard(page, config):
     """
     print("\nStarting automated checkout wizard...")
     for attempt in range(25):
+        dismiss_cookie_consent(page)
+        # 0. Handle landing on dashboard / My Account with item in cart
+        if "account" in page.url and page.locator("a:has-text('Cart'), button:has-text('Cart')").count() > 0:
+            cart_icon = page.locator("a:has-text('Cart'), button:has-text('Cart')").first
+            if "0 Item" not in cart_icon.inner_text():
+                print("Wizard: Found items in cart on account page. Clicking Cart icon to checkout...")
+                cart_icon.click()
+                time.sleep(4)
+                page.wait_for_load_state("networkidle")
+                continue
+
         # 1. Review Reservation Details checkbox + confirm (Screenshot 3)
         review_chk = page.locator("mat-checkbox:has-text('details are correct'), mat-checkbox")
         review_btn = page.locator("button:has-text('Confirm reservation details')")
@@ -880,7 +891,18 @@ def main():
             sys.exit(1)
             
         if password:
-            login_to_ontario_parks(page, config["email"], password)
+            # Check if login prompt is visible (without navigating away and losing returnUrl)
+            email_input = page.locator("input[type='email'], input#email, input[formcontrolname='email']")
+            if email_input.count() > 0 and email_input.first.is_visible():
+                print("Login prompt detected. Submitting credentials...")
+                page.locator("input#email").first.fill(config["email"])
+                page.locator("input#password").first.fill(password)
+                page.locator("#loginButton").first.click()
+                print("Submitted credentials, waiting for navigation...")
+                time.sleep(6)
+                page.wait_for_load_state("networkidle")
+            else:
+                print("No login prompt detected, proceeding...")
         else:
             print("\n" + "*"*80)
             print("⚠️ ACTION REQUIRED: If you are not signed in, please log in to your Ontario Parks")
@@ -918,7 +940,7 @@ def main():
             conf_number = match.group(0)
             print(f"Captured confirmation number: {conf_number}")
         else:
-            match_any = re.search(r"Reservation\s*(?:Number|#)?\s*:?\s*([A-Z0-9\-]+)", page_text, re.IGNORECASE)
+            match_any = re.search(r"Reservation\s*(?:Number|#)?\s*:?\s*([A-Z0-9\-]{5,})", page_text, re.IGNORECASE)
             if match_any:
                 conf_number = match_any.group(1).strip()
                 print(f"Captured confirmation number: {conf_number}")
