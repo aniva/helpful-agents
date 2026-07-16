@@ -815,6 +815,12 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
             consent_btn.click()
             time.sleep(2)
             
+        print("Waiting for grid cells to load...")
+        try:
+            page.locator("table.chart td.chart-cell").first.wait_for(state="visible", timeout=12000)
+        except Exception:
+            print("Warning: Timeout waiting for chart cells to become visible.")
+
         print("Locating available slot cell...")
         headers = page.locator("table.chart tr").first.locator("td, th").all()
         target_col_text = target_date.strftime("%b %d")
@@ -830,12 +836,29 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
             browser.close()
             return False
             
-        row_cells = page.locator("table.chart tr").nth(1).locator("td, th").all()
+        # Find correct row index dynamically matching "day use"
+        row_index = -1
+        rows = page.locator("table.chart tr").all()
+        for idx in range(1, len(rows)):
+            row_cells = rows[idx].locator("td, th").all()
+            if row_cells:
+                row_header_text = row_cells[0].inner_text().strip()
+                if "day use" in row_header_text.lower() or "dayuse" in row_header_text.lower():
+                    row_index = idx
+                    break
+        if row_index == -1:
+            print("Warning: 'DVP - Day Use' row not found dynamically, falling back to first row.")
+            row_index = 1
+        else:
+            print(f"Selected row index {row_index} matching Day Use activity.")
+            
+        row_cells = rows[row_index].locator("td, th").all()
         cell = row_cells[col_index]
         label = cell.get_attribute("aria-label") or ""
         
         if "Available" not in label:
             print(f"Error: Daily Vehicle Permit for {park_name} on {target_date_str} is NOT available!")
+            print(f"Cell label content: '{label}'")
             browser.close()
             return False
             
