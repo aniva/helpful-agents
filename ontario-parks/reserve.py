@@ -410,7 +410,10 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
         if review_btn.count() > 0 and review_btn.first.is_visible():
             print("Wizard: Confirming reservation details...")
             if review_chk_input.count() > 0 and not review_chk_input.first.is_checked():
-                review_chk_parent.first.click()
+                try:
+                    review_chk_input.first.check(force=True)
+                except Exception:
+                    review_chk_parent.first.click()
                 time.sleep(1)
             if request_approval_callback:
                 screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_1.png")
@@ -449,7 +452,10 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
         if policies_btn.count() > 0 and policies_btn.first.is_visible():
             print("Wizard: Confirming policies acknowledgements...")
             if policies_chk_input.count() > 0 and not policies_chk_input.first.is_checked():
-                policies_chk_parent.first.click()
+                try:
+                    policies_chk_input.first.check(force=True)
+                except Exception:
+                    policies_chk_parent.first.click()
                 time.sleep(1)
             if request_approval_callback:
                 screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_3.png")
