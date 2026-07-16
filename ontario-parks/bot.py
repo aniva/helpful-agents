@@ -10,7 +10,7 @@ import calendar
 
 # Add current dir to path to import reserve
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from reserve import load_config, send_telegram_message
+from reserve import load_config, send_telegram_message, run_booking_flow
 
 def format_reservations_html():
     json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_reservations.json")
@@ -38,6 +38,89 @@ def format_reservations_html():
         html_lines.append(line)
         
     return "\n".join(html_lines)
+
+active_approvals = {}
+
+def send_telegram_photo(token, chat_id, caption, photo_path, keyboard=None):
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    data = {
+        "chat_id": chat_id,
+        "caption": caption,
+        "parse_mode": "HTML"
+    }
+    if keyboard:
+        data["reply_markup"] = json.dumps(keyboard)
+        
+    with open(photo_path, "rb") as f:
+        files = {"photo": f}
+        try:
+            res = requests.post(url, data=data, files=files, timeout=20)
+            if res.status_code == 200:
+                return res.json().get("result", {}).get("message_id")
+            else:
+                print(f"Error sendPhoto: {res.text}")
+        except Exception as e:
+            print(f"Error sending photo: {e}")
+    return None
+
+def edit_telegram_photo_caption(token, chat_id, message_id, caption):
+    url = f"https://api.telegram.org/bot{token}/editMessageCaption"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "caption": caption,
+        "parse_mode": "HTML",
+        "reply_markup": json.dumps({"inline_keyboard": []})
+    }
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Error editing photo caption: {e}")
+
+def request_approval(step_name, description, screenshot_path):
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    
+    caption = (
+        f"⚠️ <b>[Step Approval Required]</b>\n\n"
+        f"<b>Step:</b> {step_name}\n"
+        f"<b>Summary:</b> {description}\n\n"
+        f"Please click below to continue or cancel."
+    )
+    
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Approve", "callback_data": "step_approve"},
+                {"text": "❌ Deny / Abort", "callback_data": "step_deny"}
+            ]
+        ]
+    }
+    
+    msg_id = send_telegram_photo(token, chat_id, caption, screenshot_path, keyboard)
+    if not msg_id:
+        print("Failed to send approval photo to Telegram.")
+        return False
+        
+    event = threading.Event()
+    active_approvals[msg_id] = {
+        "event": event,
+        "status": None
+    }
+    
+    print(f"Waiting for user approval on message {msg_id}...")
+    event.wait()
+    
+    status = active_approvals[msg_id]["status"]
+    # Clean up
+    active_approvals.pop(msg_id, None)
+    
+    if status == "approved":
+        edit_telegram_photo_caption(token, chat_id, msg_id, f"✅ <b>[Approved]</b>\n<b>Step:</b> {step_name}\nProceeding...")
+        return True
+    else:
+        edit_telegram_photo_caption(token, chat_id, msg_id, f"❌ <b>[Denied / Aborted]</b>\n<b>Step:</b> {step_name}\nBooking halted.")
+        return False
 
 def send_telegram_keyboard(token, chat_id, text, keyboard):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -184,16 +267,21 @@ def list_task():
 
 def book_task(park, date):
     try:
-        # Run subprocess
-        res = subprocess.run([sys.executable, "reserve.py", "book", "--park", park, "--date", date, "--headless", "true"], capture_output=True, text=True)
-        if res.returncode == 0:
+        success = run_booking_flow(
+            config,
+            target_park_override=park,
+            target_date_override=date,
+            is_headless=True,
+            request_approval_callback=request_approval
+        )
+        if success:
             reply = "✅ <b>Booking process completed successfully!</b>"
         else:
-            reply = f"❌ <b>Booking failed for {park} ({date}):</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
+            reply = f"❌ <b>Booking aborted or failed for {park} ({date}).</b>"
             
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
     except Exception as e:
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ Error: {e}")
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ <b>Booking failed with error:</b> {e}")
 
 def cancel_task(res_num):
     try:
@@ -324,6 +412,26 @@ def handle_callback(callback_query):
         
     elif data == "cancel_wizard":
         edit_telegram_keyboard(token, chat_id, message_id, "❌ <i>Booking wizard closed.</i>")
+
+    elif data in ["step_approve", "step_deny"]:
+        status = "approved" if data == "step_approve" else "denied"
+        if message_id in active_approvals:
+            active_approvals[message_id]["status"] = status
+            active_approvals[message_id]["event"].set()
+        else:
+            # Edit caption/text to show expired message
+            url = f"https://api.telegram.org/bot{token}/editMessageCaption"
+            payload = {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "caption": "⚠️ <b>Transaction expired or already processed.</b>",
+                "parse_mode": "HTML",
+                "reply_markup": json.dumps({"inline_keyboard": []})
+            }
+            try:
+                requests.post(url, json=payload, timeout=10)
+            except Exception:
+                pass
 
 def main():
     global config

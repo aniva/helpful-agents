@@ -384,7 +384,7 @@ def login_to_ontario_parks(page, email_user, password):
     time.sleep(6)
     page.wait_for_load_state("networkidle")
 
-def run_checkout_wizard(page, config):
+def run_checkout_wizard(page, config, request_approval_callback=None):
     """
     Scans and automates the sequential checkout wizard panels headlessly.
     """
@@ -409,6 +409,12 @@ def run_checkout_wizard(page, config):
             if review_chk.count() > 0 and not review_chk.first.is_checked():
                 review_chk.first.click()
                 time.sleep(1)
+            if request_approval_callback:
+                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_1.png")
+                page.screenshot(path=screenshot_path)
+                approved = request_approval_callback("1. Review Details", "Checked 'Details are correct' checkbox.", screenshot_path)
+                if not approved:
+                    return False
             review_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -418,6 +424,12 @@ def run_checkout_wizard(page, config):
         cart_btn = page.locator("button:has-text('Proceed to checkout')")
         if cart_btn.count() > 0 and cart_btn.first.is_visible():
             print("Wizard: Proceeding to checkout from shopping cart...")
+            if request_approval_callback:
+                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_2.png")
+                page.screenshot(path=screenshot_path)
+                approved = request_approval_callback("2. Shopping Cart", "Ready to click 'Proceed to checkout'.", screenshot_path)
+                if not approved:
+                    return False
             cart_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -431,6 +443,12 @@ def run_checkout_wizard(page, config):
             if policies_chk.count() > 0 and not policies_chk.first.is_checked():
                 policies_chk.first.click()
                 time.sleep(1)
+            if request_approval_callback:
+                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_3.png")
+                page.screenshot(path=screenshot_path)
+                approved = request_approval_callback("3. Policies & Rules", "Checked 'Agree to rules' checkbox.", screenshot_path)
+                if not approved:
+                    return False
             policies_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -440,6 +458,12 @@ def run_checkout_wizard(page, config):
         acc_btn = page.locator("button:has-text('Confirm account details')")
         if acc_btn.count() > 0 and acc_btn.first.is_visible():
             print("Wizard: Confirming account details...")
+            if request_approval_callback:
+                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_4.png")
+                page.screenshot(path=screenshot_path)
+                approved = request_approval_callback("4. Account Details", "Ready to click 'Confirm account details'.", screenshot_path)
+                if not approved:
+                    return False
             acc_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -453,6 +477,12 @@ def run_checkout_wizard(page, config):
             if occupant_radio.count() > 0:
                 occupant_radio.first.click()
                 time.sleep(1)
+            if request_approval_callback:
+                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_5.png")
+                page.screenshot(path=screenshot_path)
+                approved = request_approval_callback("5. Occupant details", "Selected 'I will be the occupant'.", screenshot_path)
+                if not approved:
+                    return False
             occupant_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -485,6 +515,12 @@ def run_checkout_wizard(page, config):
                 print(" - Filled province:", config["vehicle_province"])
                 time.sleep(0.5)
                 
+            if request_approval_callback:
+                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_6.png")
+                page.screenshot(path=screenshot_path)
+                approved = request_approval_callback("6. Vehicle & Permit Info", f"Filled Plate: {config['vehicle_plate']}, Permit: {config['permit_number']}.", screenshot_path)
+                if not approved:
+                    return False
             additional_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -494,6 +530,12 @@ def run_checkout_wizard(page, config):
         confirm_btn = page.locator("button:has-text('Confirm booking')")
         if confirm_btn.count() > 0 and confirm_btn.first.is_visible():
             print("Wizard: Finalizing and clicking Confirm Booking...")
+            if request_approval_callback:
+                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_7.png")
+                page.screenshot(path=screenshot_path)
+                approved = request_approval_callback("7. Final Checkout", "Ready to click 'Confirm booking' to finalize reservation.", screenshot_path)
+                if not approved:
+                    return False
             confirm_btn.first.click()
             time.sleep(5)
             page.wait_for_load_state("networkidle")
@@ -505,6 +547,7 @@ def run_checkout_wizard(page, config):
             break
             
         time.sleep(2)
+    return True
 
 def list_reservations(email_user, password, headless=True):
     print("Launching browser to list reservations...")
@@ -614,78 +657,7 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
         browser.close()
         return False
 
-def main():
-    config = load_config()
-    
-    parser = argparse.ArgumentParser(description="Ontario Parks Reservation Helper")
-    subparsers = parser.add_subparsers(dest="command")
-    
-    # Subcommands
-    book_parser = subparsers.add_parser("book", help="Book a daily vehicle permit")
-    book_parser.add_argument("--park", help="Name of the park (e.g. 'Sibbald Point')")
-    book_parser.add_argument("--date", help="Date: 'today', 'tomorrow', 'day_after', or YYYY-MM-DD")
-    book_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true", help="Run headlessly")
-    
-    list_parser = subparsers.add_parser("list", help="List active reservations")
-    list_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
-    
-    cancel_parser = subparsers.add_parser("cancel", help="Cancel a reservation")
-    cancel_parser.add_argument("--reservation", required=True, help="Reservation number (e.g. INOP26-XXXXXX)")
-    cancel_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
-    
-    # Flags (for backward compatibility)
-    parser.add_argument("--setup-telegram", action="store_true", help="Configure Telegram Chat ID")
-    parser.add_argument("--forecast-only", action="store_true", help="Only show wind forecast and exit")
-    
-    args = parser.parse_args()
-    
-    # 1. Handle Setup commands
-    if args.setup_telegram or (len(sys.argv) > 1 and sys.argv[1] == "--setup-telegram"):
-        chat_id = resolve_telegram_chat_id(config["telegram_token"])
-        if chat_id:
-            config["telegram_chat_id"] = chat_id
-            save_config(config)
-            send_telegram_message(config["telegram_token"], chat_id, "⚙️ Telegram integration successfully verified!")
-            print("Telegram Chat ID updated and test message sent successfully.")
-        sys.exit(0)
-        
-    # 2. Handle subcommands
-    if args.command == "list":
-        password = config.get("ontario_parks_password")
-        if not password:
-            print("Error: 'ontario_parks_password' is not configured in ontario_parks_config.json!")
-            sys.exit(1)
-        headless = args.headless == "true"
-        reservations = list_reservations(config["email"], password, headless=headless)
-        print("\nActive Reservations List:")
-        print("=" * 80)
-        for r in reservations:
-            print(f"Num: {r['reservation_number']:<18} | Park: {r['park']:<28} | Date: {r['date']:<16} | Vehicle: {r['vehicle']}")
-        print("=" * 80)
-        sys.exit(0)
-        
-    elif args.command == "cancel":
-        password = config.get("ontario_parks_password")
-        if not password:
-            print("Error: 'ontario_parks_password' is not configured in ontario_parks_config.json!")
-            sys.exit(1)
-        headless = args.headless == "true"
-        success = cancel_reservation(config["email"], password, args.reservation, headless=headless)
-        if success:
-            sys.exit(0)
-        else:
-            sys.exit(1)
-            
-    # Default to booking flow
-    is_headless = True
-    target_park_override = None
-    target_date_override = None
-    
-    if args.command == "book":
-        is_headless = args.headless == "true"
-        target_park_override = args.park
-        target_date_override = args.date
-        
+def run_booking_flow(config, target_park_override=None, target_date_override=None, is_headless=True, request_approval_callback=None, forecast_only=False):
     # Ask about date if not overridden
     today = datetime.date.today()
     dates = [
@@ -708,7 +680,7 @@ def main():
                 choice = 1
             except ValueError:
                 print(f"Error: Invalid date format '{target_date_override}'. Use YYYY-MM-DD, today, tomorrow, or day_after.")
-                sys.exit(1)
+                return False
     else:
         print("=" * 60)
         print("Ontario Park Daily Vehicle Permit Helper")
@@ -732,26 +704,14 @@ def main():
     target_date_str = target_date.strftime("%Y-%m-%d")
     print(f"\nSelected Date: {target_label} ({target_date_str})")
     
-    if args.forecast_only:
+    if forecast_only:
         print("\n[Weather/Wind] Fetching wind forecasts for participating kiting parks...")
         for name, info in PARKS.items():
             forecast = fetch_weather_forecast(info["lat"], info["lon"], target_date_str)
             if forecast:
                 print(f" - {name:<30} | Wind: {forecast['max_speed']:>4} kts (Gust: {forecast['max_gust']:>4} kts) | {forecast['condition']}")
-        sys.exit(0)
+        return True
         
-    if not config.get("telegram_chat_id"):
-        print("\n⚠️ Telegram Chat ID is not configured!")
-        setup = input_with_timeout("Would you like to resolve your Telegram Chat ID now? (y/n) [default: y]: ", timeout=30, default="y").strip().lower()
-        if not setup or setup == 'y':
-            chat_id = resolve_telegram_chat_id(config["telegram_token"])
-            if chat_id:
-                config["telegram_chat_id"] = chat_id
-                save_config(config)
-                send_telegram_message(config["telegram_token"], chat_id, "⚙️ Telegram integration successfully verified!")
-            else:
-                print("Could not resolve Chat ID. Notifications will fail. You can configure it manually in config.json.")
-                
     print("\n[Weather/Wind] Fetching wind forecasts for participating kiting parks...")
     ranked_parks = []
     for name, info in PARKS.items():
@@ -786,7 +746,7 @@ def main():
                 break
         if not selected_park:
             print(f"Error: Overridden park name '{target_park_override}' could not be matched!")
-            sys.exit(1)
+            return False
     else:
         park_choice = input_with_timeout(f"\nSelect a park to reserve (1-{len(ranked_parks)}) [default: 1]: ", timeout=45, default="1").strip()
         if not park_choice:
@@ -823,13 +783,7 @@ def main():
         print("Navigating to homepage...")
         page.goto("https://reservations.ontarioparks.ca/", timeout=40000)
         page.wait_for_load_state("networkidle")
-        
-        # Handle cookie consent overlay if present
-        consent_btn = page.locator("button:has-text('I consent'), button:has-text('I Consent')")
-        if consent_btn.count() > 0:
-            print("Handling cookie consent banner...")
-            consent_btn.first.click()
-            time.sleep(2)
+        dismiss_cookie_consent(page)
         
         print("Opening Day Use section...")
         page.click("#mat-tab-link-1")
@@ -874,7 +828,7 @@ def main():
         if col_index == -1:
             print(f"Error: Target column '{target_col_text}' not found in availability grid!")
             browser.close()
-            sys.exit(1)
+            return False
             
         row_cells = page.locator("table.chart tr").nth(1).locator("td, th").all()
         cell = row_cells[col_index]
@@ -882,9 +836,8 @@ def main():
         
         if "Available" not in label:
             print(f"Error: Daily Vehicle Permit for {park_name} on {target_date_str} is NOT available!")
-            print(f"Current cell label: '{label}'")
             browser.close()
-            sys.exit(1)
+            return False
             
         print("Permit is available! Selecting day slot...")
         cell.click()
@@ -901,7 +854,7 @@ def main():
         if is_headless and not password:
             print("Error: Headless run selected, but 'ontario_parks_password' is not configured!")
             browser.close()
-            sys.exit(1)
+            return False
             
         if password:
             # Check if login prompt is visible (without navigating away and losing returnUrl)
@@ -924,8 +877,12 @@ def main():
             print("*"*80)
             input_with_timeout("\nPress Enter to continue after logging in (Timeout in 180s)...", timeout=180, default="")
             
-        run_checkout_wizard(page, config)
-        
+        wizard_success = run_checkout_wizard(page, config, request_approval_callback)
+        if not wizard_success:
+            print("Wizard aborted or failed.")
+            browser.close()
+            return False
+            
         print("Wizard Completed. Running preregistration automation...")
         try:
             preregister_btn = page.locator("button:has-text('Preregister'), a:has-text('Preregister')")
@@ -968,7 +925,7 @@ def main():
         if conf_number == "Unknown":
             print("Error: Booking process failed or confirmation number could not be found.")
             browser.close()
-            sys.exit(1)
+            return False
             
         browser.close()
         
@@ -1003,6 +960,86 @@ def main():
         print("\nTelegram chat ID not configured, skipped notification.")
         print("Formatted message:")
         print(msg_text.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", ""))
+
+def main():
+    config = load_config()
+    
+    parser = argparse.ArgumentParser(description="Ontario Parks Reservation Helper")
+    subparsers = parser.add_subparsers(dest="command")
+    
+    # Subcommands
+    book_parser = subparsers.add_parser("book", help="Book a daily vehicle permit")
+    book_parser.add_argument("--park", help="Name of the park (e.g. 'Sibbald Point')")
+    book_parser.add_argument("--date", help="Date: 'today', 'tomorrow', 'day_after', or YYYY-MM-DD")
+    book_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true", help="Run headlessly")
+    
+    list_parser = subparsers.add_parser("list", help="List active reservations")
+    list_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
+    
+    cancel_parser = subparsers.add_parser("cancel", help="Cancel a reservation")
+    cancel_parser.add_argument("--reservation", required=True, help="Reservation Receipt Number to cancel")
+    cancel_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
+    
+    parser.add_argument("--forecast-only", action="store_true", help="Only show weather/wind forecast for today, tomorrow, and day after")
+    parser.add_argument("--setup-telegram", action="store_true", help="Interact and resolve Telegram Chat ID dynamically")
+    
+    args = parser.parse_args()
+    
+    if args.setup_telegram:
+        chat_id = resolve_telegram_chat_id(config["telegram_token"])
+        if chat_id:
+            config["telegram_chat_id"] = chat_id
+            save_config(config)
+            send_telegram_message(config["telegram_token"], chat_id, "⚙️ Telegram integration successfully verified!")
+            print("Telegram Chat ID updated and test message sent successfully.")
+        sys.exit(0)
+        
+    if args.command == "list":
+        password = config.get("ontario_parks_password")
+        if not password:
+            print("Error: 'ontario_parks_password' is not configured!")
+            sys.exit(1)
+        headless = args.headless == "true"
+        reservations = list_reservations(config["email"], password, headless=headless)
+        print("\nActive Reservations List:")
+        print("=" * 80)
+        for r in reservations:
+            print(f"Num: {r['reservation_number']:<18} | Park: {r['park']:<28} | Date: {r['date']:<16} | Vehicle: {r['vehicle']}")
+        print("=" * 80)
+        sys.exit(0)
+        
+    elif args.command == "cancel":
+        password = config.get("ontario_parks_password")
+        if not password:
+            print("Error: 'ontario_parks_password' is not configured!")
+            sys.exit(1)
+        headless = args.headless == "true"
+        success = cancel_reservation(config["email"], password, args.reservation, headless=headless)
+        if success:
+            sys.exit(0)
+        else:
+            sys.exit(1)
+            
+    is_headless = True
+    target_park_override = None
+    target_date_override = None
+    
+    if args.command == "book":
+        is_headless = args.headless == "true"
+        target_park_override = args.park
+        target_date_override = args.date
+        
+    success = run_booking_flow(
+        config,
+        target_park_override=target_park_override,
+        target_date_override=target_date_override,
+        is_headless=is_headless,
+        forecast_only=args.forecast_only
+    )
+    if success:
+        sys.exit(0)
+    else:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
