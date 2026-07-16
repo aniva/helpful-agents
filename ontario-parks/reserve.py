@@ -683,7 +683,7 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
         time.sleep(3)
         
         # Locate card containing the target reservation number
-        card = page.locator("mat-card, .mat-mdc-card, .mat-card", has_text=target_res_num)
+        card = page.locator("section.compact-booking, app-compact-booking, mat-card, .mat-card", has_text=target_res_num)
         
         cancel_btn = card.locator("button:has-text('Cancel reservation'), a:has-text('Cancel reservation')")
         if cancel_btn.count() > 0 and cancel_btn.first.is_visible():
