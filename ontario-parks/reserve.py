@@ -884,9 +884,9 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         dismiss_park_alerts(page)
         
         print("Clicking Reserve...")
-        dismiss_park_alerts(page)
         page.click("#reserveButton")
-        time.sleep(4)
+        time.sleep(5)
+        dismiss_park_alerts(page)
         page.wait_for_load_state("networkidle")
         
         password = config.get("ontario_parks_password")
