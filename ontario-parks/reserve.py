@@ -384,7 +384,7 @@ def login_to_ontario_parks(page, email_user, password):
     time.sleep(6)
     page.wait_for_load_state("networkidle")
 
-def run_checkout_wizard(page, config, request_approval_callback=None):
+def run_checkout_wizard(page, config, request_approval_callback=None, is_headless=True):
     """
     Scans and automates the sequential checkout wizard panels headlessly.
     """
@@ -396,6 +396,8 @@ def run_checkout_wizard(page, config, request_approval_callback=None):
             cart_icon = page.locator("a:has-text('Cart'), button:has-text('Cart')").first
             if "0 Item" not in cart_icon.inner_text():
                 print("Wizard: Found items in cart on account page. Clicking Cart icon to checkout...")
+                if not is_headless:
+                    input("\n[Headed Debug] Found items in cart on My Account. Press Enter to open Cart...")
                 cart_icon.click()
                 time.sleep(4)
                 page.wait_for_load_state("networkidle")
@@ -415,6 +417,8 @@ def run_checkout_wizard(page, config, request_approval_callback=None):
                 approved = request_approval_callback("1. Review Details", "Checked 'Details are correct' checkbox.", screenshot_path)
                 if not approved:
                     return False
+            if not is_headless:
+                input("\n[Headed Debug] Step 1: Details are checked. Press Enter to click 'Confirm reservation details'...")
             review_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -430,6 +434,8 @@ def run_checkout_wizard(page, config, request_approval_callback=None):
                 approved = request_approval_callback("2. Shopping Cart", "Ready to click 'Proceed to checkout'.", screenshot_path)
                 if not approved:
                     return False
+            if not is_headless:
+                input("\n[Headed Debug] Step 2: Shopping Cart. Press Enter to click 'Proceed to checkout'...")
             cart_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -449,6 +455,8 @@ def run_checkout_wizard(page, config, request_approval_callback=None):
                 approved = request_approval_callback("3. Policies & Rules", "Checked 'Agree to rules' checkbox.", screenshot_path)
                 if not approved:
                     return False
+            if not is_headless:
+                input("\n[Headed Debug] Step 3: Rules checked. Press Enter to click 'Confirm acknowledgements'...")
             policies_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -464,6 +472,8 @@ def run_checkout_wizard(page, config, request_approval_callback=None):
                 approved = request_approval_callback("4. Account Details", "Ready to click 'Confirm account details'.", screenshot_path)
                 if not approved:
                     return False
+            if not is_headless:
+                input("\n[Headed Debug] Step 4: Account Details. Press Enter to click 'Confirm account details'...")
             acc_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -483,6 +493,8 @@ def run_checkout_wizard(page, config, request_approval_callback=None):
                 approved = request_approval_callback("5. Occupant details", "Selected 'I will be the occupant'.", screenshot_path)
                 if not approved:
                     return False
+            if not is_headless:
+                input("\n[Headed Debug] Step 5: Occupant selected. Press Enter to click 'Confirm occupant'...")
             occupant_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -521,6 +533,8 @@ def run_checkout_wizard(page, config, request_approval_callback=None):
                 approved = request_approval_callback("6. Vehicle & Permit Info", f"Filled Plate: {config['vehicle_plate']}, Permit: {config['permit_number']}.", screenshot_path)
                 if not approved:
                     return False
+            if not is_headless:
+                input("\n[Headed Debug] Step 6: Vehicle plate and Permit filled. Press Enter to click 'Confirm additional information'...")
             additional_btn.first.click()
             time.sleep(3)
             page.wait_for_load_state("networkidle")
@@ -536,6 +550,8 @@ def run_checkout_wizard(page, config, request_approval_callback=None):
                 approved = request_approval_callback("7. Final Checkout", "Ready to click 'Confirm booking' to finalize reservation.", screenshot_path)
                 if not approved:
                     return False
+            if not is_headless:
+                input("\n[Headed Debug] Step 7: Ready to book! Press Enter to finalize and book (THIS WILL PLACE A REAL RESERVATION!)...")
             confirm_btn.first.click()
             time.sleep(5)
             page.wait_for_load_state("networkidle")
@@ -900,7 +916,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
             print("*"*80)
             input_with_timeout("\nPress Enter to continue after logging in (Timeout in 180s)...", timeout=180, default="")
             
-        wizard_success = run_checkout_wizard(page, config, request_approval_callback)
+        wizard_success = run_checkout_wizard(page, config, request_approval_callback, is_headless)
         if not wizard_success:
             print("Wizard aborted or failed.")
             browser.close()
