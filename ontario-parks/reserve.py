@@ -345,6 +345,16 @@ def dismiss_cookie_consent(page):
     except Exception:
         pass
 
+def dismiss_park_alerts(page):
+    try:
+        ack_btn = page.locator("button:has-text('Acknowledge'), button:has-text('acknowledge')")
+        if ack_btn.count() > 0 and ack_btn.first.is_visible():
+            print("Handling Park Alerts popup...")
+            ack_btn.first.click()
+            time.sleep(2)
+    except Exception:
+        pass
+
 def login_to_ontario_parks(page, email_user, password):
     print("Navigating to homepage first...")
     page.goto("https://reservations.ontarioparks.ca/", timeout=40000)
@@ -843,6 +853,7 @@ def main():
         print("Submitting search...")
         page.click("#actionSearch")
         time.sleep(5)
+        dismiss_park_alerts(page)
         
         consent_btn = page.locator("#consentButton")
         if consent_btn.count() > 0 and consent_btn.is_visible():
@@ -878,8 +889,10 @@ def main():
         print("Permit is available! Selecting day slot...")
         cell.click()
         time.sleep(2)
+        dismiss_park_alerts(page)
         
         print("Clicking Reserve...")
+        dismiss_park_alerts(page)
         page.click("#reserveButton")
         time.sleep(4)
         page.wait_for_load_state("networkidle")
@@ -942,14 +955,21 @@ def main():
         else:
             match_any = re.search(r"Reservation\s*(?:Number|#)?\s*:?\s*([A-Z0-9\-]{5,})", page_text, re.IGNORECASE)
             if match_any:
-                conf_number = match_any.group(1).strip()
-                print(f"Captured confirmation number: {conf_number}")
+                temp_num = match_any.group(1).strip()
+                if temp_num.lower() not in ["support", "details", "information", "reservations", "account"]:
+                    conf_number = temp_num
+                    print(f"Captured confirmation number: {conf_number}")
                 
         screenshot_name = f"confirmation_{target_date_str}_{conf_number.replace('-', '_')}.png"
         screenshot_path = os.path.join(os.path.dirname(__file__), screenshot_name)
         page.screenshot(path=screenshot_path)
         print(f"Saved confirmation screenshot to {screenshot_path}")
         
+        if conf_number == "Unknown":
+            print("Error: Booking process failed or confirmation number could not be found.")
+            browser.close()
+            sys.exit(1)
+            
         browser.close()
         
     email_verified = "No (skipped or not found)"
