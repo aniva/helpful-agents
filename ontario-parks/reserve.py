@@ -698,17 +698,41 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
         if cancel_btn.count() > 0 and cancel_btn.first.is_visible():
             print("Found Cancel button! Clicking it...")
             cancel_btn.first.click()
-            time.sleep(4)
+            time.sleep(5)
             page.wait_for_load_state("networkidle")
             
-            confirm_cancel_btn = page.locator("button:has-text('Cancel reservation'), button:has-text('Confirm')")
-            if confirm_cancel_btn.count() > 0:
-                print("Confirming cancellation...")
-                confirm_cancel_btn.first.click()
+            # Step 1: Acknowledgement
+            chk = page.locator("mat-checkbox:has-text('I acknowledge') input, mat-checkbox input")
+            if chk.count() > 0:
+                print("Checking acknowledgement checkbox...")
+                chk.first.check(force=True)
+                time.sleep(1)
+            else:
+                print("Acknowledgment checkbox not found, trying parent click...")
+                page.locator("mat-checkbox").first.click()
+                time.sleep(1)
+                
+            proceed_btn = page.locator("button:has-text('Proceed')")
+            if proceed_btn.count() > 0:
+                print("Clicking Proceed...")
+                proceed_btn.first.click()
                 time.sleep(5)
-                print(f"Reservation {target_res_num} cancelled successfully!")
-                browser.close()
-                return True
+                page.wait_for_load_state("networkidle")
+                
+                # Step 2: Confirmation
+                confirm_btn = page.locator("button:has-text('Confirm cancellation')")
+                if confirm_btn.count() > 0:
+                    print("Confirming cancellation...")
+                    confirm_btn.first.click()
+                    time.sleep(5)
+                    page.wait_for_load_state("networkidle")
+                    print(f"Reservation {target_res_num} cancelled successfully!")
+                    browser.close()
+                    return True
+                else:
+                    print("Error: Confirm cancellation button not found on step 2!")
+            else:
+                print("Error: Proceed button not found on step 1!")
         else:
             print(f"Error: Could not find active 'Cancel reservation' button for {target_res_num}.")
             
