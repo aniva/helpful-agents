@@ -384,7 +384,25 @@ def login_to_ontario_parks(page, email_user, password):
     time.sleep(6)
     page.wait_for_load_state("networkidle")
 
-def run_checkout_wizard(page, config, request_approval_callback=None, is_headless=True):
+def handle_step_feedback(step_name, description, screenshot_name, page, request_approval_callback, progress_callback):
+    screenshot_path = os.path.join(os.path.dirname(__file__), screenshot_name)
+    try:
+        page.screenshot(path=screenshot_path)
+    except Exception as e:
+        print("Warning: Failed to capture step screenshot:", e)
+        
+    if progress_callback:
+        try:
+            progress_callback(step_name, description, screenshot_path)
+        except Exception as e:
+            print("Warning: Progress callback failed:", e)
+            
+    if request_approval_callback:
+        return request_approval_callback(step_name, description, screenshot_path)
+        
+    return True
+
+def run_checkout_wizard(page, config, request_approval_callback=None, is_headless=True, progress_callback=None):
     """
     Scans and automates the sequential checkout wizard panels headlessly.
     """
@@ -430,12 +448,9 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
                 except Exception:
                     review_chk_parent.first.click()
                 time.sleep(1)
-            if request_approval_callback:
-                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_1.png")
-                page.screenshot(path=screenshot_path)
-                approved = request_approval_callback("1. Review Details", "Checked 'Details are correct' checkbox.", screenshot_path)
-                if not approved:
-                    return False
+            approved = handle_step_feedback("1. Review Details", "Checked 'Details are correct' checkbox.", "debug_step_1.png", page, request_approval_callback, progress_callback)
+            if not approved:
+                return False
             if not is_headless:
                 input("\n[Headed Debug] Step 1: Details are checked. Press Enter to click 'Confirm reservation details'...")
             review_btn.first.click()
@@ -447,12 +462,9 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
         cart_btn = page.locator("button:has-text('Proceed to checkout')")
         if cart_btn.count() > 0 and cart_btn.first.is_visible():
             print("Wizard: Proceeding to checkout from shopping cart...")
-            if request_approval_callback:
-                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_2.png")
-                page.screenshot(path=screenshot_path)
-                approved = request_approval_callback("2. Shopping Cart", "Ready to click 'Proceed to checkout'.", screenshot_path)
-                if not approved:
-                    return False
+            approved = handle_step_feedback("2. Shopping Cart", "Ready to click 'Proceed to checkout'.", "debug_step_2.png", page, request_approval_callback, progress_callback)
+            if not approved:
+                return False
             if not is_headless:
                 input("\n[Headed Debug] Step 2: Shopping Cart. Press Enter to click 'Proceed to checkout'...")
             cart_btn.first.click()
@@ -472,12 +484,9 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
                 except Exception:
                     policies_chk_parent.first.click()
                 time.sleep(1)
-            if request_approval_callback:
-                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_3.png")
-                page.screenshot(path=screenshot_path)
-                approved = request_approval_callback("3. Policies & Rules", "Checked 'Agree to rules' checkbox.", screenshot_path)
-                if not approved:
-                    return False
+            approved = handle_step_feedback("3. Policies & Rules", "Checked 'Agree to rules' checkbox.", "debug_step_3.png", page, request_approval_callback, progress_callback)
+            if not approved:
+                return False
             if not is_headless:
                 input("\n[Headed Debug] Step 3: Rules checked. Press Enter to click 'Confirm acknowledgements'...")
             policies_btn.first.click()
@@ -489,12 +498,9 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
         acc_btn = page.locator("button:has-text('Confirm account details')")
         if acc_btn.count() > 0 and acc_btn.first.is_visible():
             print("Wizard: Confirming account details...")
-            if request_approval_callback:
-                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_4.png")
-                page.screenshot(path=screenshot_path)
-                approved = request_approval_callback("4. Account Details", "Ready to click 'Confirm account details'.", screenshot_path)
-                if not approved:
-                    return False
+            approved = handle_step_feedback("4. Account Details", "Ready to click 'Confirm account details'.", "debug_step_4.png", page, request_approval_callback, progress_callback)
+            if not approved:
+                return False
             if not is_headless:
                 input("\n[Headed Debug] Step 4: Account Details. Press Enter to click 'Confirm account details'...")
             acc_btn.first.click()
@@ -510,12 +516,9 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
             if occupant_radio.count() > 0:
                 occupant_radio.first.click()
                 time.sleep(1)
-            if request_approval_callback:
-                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_5.png")
-                page.screenshot(path=screenshot_path)
-                approved = request_approval_callback("5. Occupant details", "Selected 'I will be the occupant'.", screenshot_path)
-                if not approved:
-                    return False
+            approved = handle_step_feedback("5. Occupant details", "Selected 'I will be the occupant'.", "debug_step_5.png", page, request_approval_callback, progress_callback)
+            if not approved:
+                return False
             if not is_headless:
                 input("\n[Headed Debug] Step 5: Occupant selected. Press Enter to click 'Confirm occupant'...")
             occupant_btn.first.click()
@@ -550,12 +553,9 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
                 print(" - Filled province:", config["vehicle_province"])
                 time.sleep(0.5)
                 
-            if request_approval_callback:
-                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_6.png")
-                page.screenshot(path=screenshot_path)
-                approved = request_approval_callback("6. Vehicle & Permit Info", f"Filled Plate: {config['vehicle_plate']}, Permit: {config['permit_number']}.", screenshot_path)
-                if not approved:
-                    return False
+            approved = handle_step_feedback("6. Vehicle & Permit Info", f"Filled Plate: {config['vehicle_plate']}, Permit: {config['permit_number']}.", "debug_step_6.png", page, request_approval_callback, progress_callback)
+            if not approved:
+                return False
             if not is_headless:
                 input("\n[Headed Debug] Step 6: Vehicle plate and Permit filled. Press Enter to click 'Confirm additional information'...")
             additional_btn.first.click()
@@ -567,12 +567,18 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
         confirm_btn = page.locator("button:has-text('Confirm booking')")
         if confirm_btn.count() > 0 and confirm_btn.first.is_visible():
             print("Wizard: Finalizing and clicking Confirm Booking...")
-            if request_approval_callback:
-                screenshot_path = os.path.join(os.path.dirname(__file__), "debug_step_7.png")
-                page.screenshot(path=screenshot_path)
-                approved = request_approval_callback("7. Final Checkout", "Ready to click 'Confirm booking' to finalize reservation.", screenshot_path)
-                if not approved:
-                    return False
+            try:
+                page_text = page.locator("body").inner_text()
+                import re
+                amount_match = re.search(r"Total\s*(?:\(CAD\))?\s*\$(\d+(?:\.\d{2})?)", page_text, re.IGNORECASE)
+                if amount_match:
+                    config["final_amount"] = f"${amount_match.group(1)}"
+                    print(f"Wizard: Extracted payment amount: {config['final_amount']}")
+            except Exception as e:
+                print("Warning: Could not extract amount:", e)
+            approved = handle_step_feedback("7. Final Checkout", "Ready to click 'Confirm booking' to finalize reservation.", "debug_step_7.png", page, request_approval_callback, progress_callback)
+            if not approved:
+                return False
             if not is_headless:
                 input("\n[Headed Debug] Step 7: Ready to book! Press Enter to finalize and book (THIS WILL PLACE A REAL RESERVATION!)...")
             confirm_btn.first.click()
@@ -696,7 +702,8 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
         browser.close()
         return False
 
-def run_booking_flow(config, target_park_override=None, target_date_override=None, is_headless=True, request_approval_callback=None, forecast_only=False):
+def run_booking_flow(config, target_park_override=None, target_date_override=None, is_headless=True, request_approval_callback=None, progress_callback=None, forecast_only=False):
+    config["final_amount"] = "Unknown"
     # Ask about date if not overridden
     today = datetime.date.today()
     dates = [
@@ -940,7 +947,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
             print("*"*80)
             input_with_timeout("\nPress Enter to continue after logging in (Timeout in 180s)...", timeout=180, default="")
             
-        wizard_success = run_checkout_wizard(page, config, request_approval_callback, is_headless)
+        wizard_success = run_checkout_wizard(page, config, request_approval_callback, is_headless, progress_callback)
         if not wizard_success:
             print("Wizard aborted or failed.")
             browser.close()
@@ -968,7 +975,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         page_text = page.locator("body").inner_text()
         
         import re
-        match = re.search(r"INOP\d+-\d+|INOP\d+-[A-Z0-9]+|OP-\d+", page_text)
+        match = re.search(r"INOP\d+-[A-Z0-9]+|INOP\d+-\d+|OP-[A-Z0-9]+", page_text)
         if match:
             conf_number = match.group(0)
             print(f"Captured confirmation number: {conf_number}")
@@ -990,6 +997,16 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
             browser.close()
             return False
             
+        # Capture final amount if not found earlier
+        amount_str = config.get("final_amount", "Unknown")
+        if amount_str == "Unknown":
+            amount_match = re.search(r"(?:Total|Paid|Amount)\s*(?:\(CAD\))?\s*:?\s*\$(\d+(?:\.\d{2})?)", page_text, re.IGNORECASE)
+            if amount_match:
+                amount_str = f"${amount_match.group(1)}"
+        print(f"Captured transaction amount: {amount_str}")
+        config["final_amount"] = amount_str
+        save_config(config)
+            
         browser.close()
         
     email_verified = "No (skipped or not found)"
@@ -1006,6 +1023,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         f"📅 <b>Date:</b> {target_label} ({target_date_str})\n"
         f"🚗 <b>Vehicle:</b> {config['vehicle_plate']} ({config['vehicle_province']})\n"
         f"🎫 <b>Permit:</b> {config['permit_number']}\n"
+        f"💰 <b>Amount:</b> {amount_str}\n"
         f"🔑 <b>Confirmation #:</b> <code>{conf_number}</code>\n"
         f"📧 <b>Email verified:</b> {email_verified}\n\n"
         f"🌬️ <b>Wind Forecast:</b> Max {selected_park['max_speed']} kts (Gust: {selected_park['max_gust']} kts), Dir: {selected_park['dir']}, {selected_park['condition']}\n\n"
@@ -1023,6 +1041,8 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         print("\nTelegram chat ID not configured, skipped notification.")
         print("Formatted message:")
         print(msg_text.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", ""))
+        
+    return True
 
 def main():
     config = load_config()

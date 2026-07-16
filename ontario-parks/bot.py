@@ -265,6 +265,17 @@ def list_task():
     except Exception as e:
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ Error: {e}")
 
+def send_progress(step_name, description, screenshot_path):
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    caption = (
+        f"ℹ️ <b>[Booking Progress]</b>\n\n"
+        f"<b>Step:</b> {step_name}\n"
+        f"<b>Summary:</b> {description}\n"
+        f"<b>Status:</b> Page completed successfully ✅"
+    )
+    send_telegram_photo(token, chat_id, caption, screenshot_path)
+
 def book_task(park, date):
     try:
         success = run_booking_flow(
@@ -272,7 +283,8 @@ def book_task(park, date):
             target_park_override=park,
             target_date_override=date,
             is_headless=True,
-            request_approval_callback=request_approval
+            request_approval_callback=None,
+            progress_callback=send_progress
         )
         if success:
             reply = "✅ <b>Booking process completed successfully!</b>"
