@@ -403,6 +403,21 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
                 page.wait_for_load_state("networkidle")
                 continue
 
+        # 0.5. Handle landing on login page during checkout
+        email_input = page.locator("input[type='email'], input#email, input[formcontrolname='email']")
+        if email_input.count() > 0 and email_input.first.is_visible():
+            password = config.get("ontario_parks_password")
+            if not password:
+                print("Wizard Error: Login prompt detected but password is not configured!")
+                return False
+            print("Wizard: Login prompt detected. Submitting credentials...")
+            page.locator("input#email").first.fill(config["email"])
+            page.locator("input#password").first.fill(password)
+            page.locator("#loginButton").first.click()
+            time.sleep(5)
+            page.wait_for_load_state("networkidle")
+            continue
+
         # 1. Review Reservation Details checkbox + confirm (Screenshot 3)
         review_chk_parent = page.locator("mat-checkbox:has-text('details are correct'), mat-checkbox")
         review_chk_input = page.locator("mat-checkbox:has-text('details are correct') input, mat-checkbox input")
@@ -806,11 +821,12 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         
         print("Navigating to homepage...")
         page.goto("https://reservations.ontarioparks.ca/", timeout=40000)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         dismiss_cookie_consent(page)
         
         print("Opening Day Use section...")
-        page.click("#mat-tab-link-1")
+        day_use_tab = page.locator("#mat-tab-link-1, a:has-text('Day Use'), .mat-tab-link:has-text('Day Use')")
+        day_use_tab.first.click()
         time.sleep(1)
         
         print(f"Searching for park: '{park_search_name}'...")
