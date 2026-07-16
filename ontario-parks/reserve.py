@@ -260,13 +260,15 @@ def resolve_telegram_chat_id(token):
     print("\n[Telegram Config] Timeout: Could not find any recent messages. Please try again.")
     return None
 
-def send_telegram_message(token, chat_id, text):
+def send_telegram_message(token, chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML"
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         res = requests.post(url, json=payload, timeout=10)
         return res.status_code == 200

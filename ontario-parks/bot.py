@@ -41,6 +41,21 @@ def format_reservations_html():
 
 active_approvals = {}
 
+MAIN_REPLY_KEYBOARD = {
+    "keyboard": [
+        [
+            {"text": "📋 List Bookings"},
+            {"text": "🌲 Book Daily Permit"}
+        ],
+        [
+            {"text": "❌ Cancel Booking"},
+            {"text": "🔍 Help"}
+        ]
+    ],
+    "resize_keyboard": True,
+    "one_time_keyboard": False
+}
+
 def send_telegram_photo(token, chat_id, caption, photo_path, keyboard=None):
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
     data = {
@@ -249,19 +264,62 @@ def get_quick_dates_keyboard(park_name):
     }
     return keyboard
 
-def list_task():
+def list_task(for_cancellation=False):
     try:
+        token = config["telegram_token"]
+        chat_id = config["telegram_chat_id"]
+        
         # Send status update
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], "🔍 Checking active reservations...")
+        send_telegram_message(token, chat_id, "🔍 Checking active reservations...")
         
         # Run subprocess
         res = subprocess.run([sys.executable, "reserve.py", "list"], capture_output=True, text=True)
         if res.returncode == 0:
-            reply = format_reservations_html()
+            json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_reservations.json")
+            if os.path.exists(json_path):
+                with open(json_path, "r", encoding="utf-8") as f:
+                    try:
+                        reservations = json.load(f)
+                    except Exception:
+                        reservations = []
+            else:
+                reservations = []
+                
+            if not reservations:
+                send_telegram_message(token, chat_id, "ℹ️ <b>No active reservations found.</b>")
+                return
+                
+            html_lines = []
+            if for_cancellation:
+                html_lines.append("❌ <b>Select a booking below to cancel:</b>\n")
+            else:
+                html_lines.append("📋 <b>Active Ontario Parks Bookings:</b>\n")
+                
+            inline_keyboard = []
+            for idx, r in enumerate(reservations, 1):
+                res_num = r["reservation_number"]
+                park_name = r["park"]
+                date_str = r["date"]
+                line = (
+                    f"<b>{idx}. {park_name}</b>\n"
+                    f"📅 <b>Date:</b> {date_str}\n"
+                    f'🎫 <b>Num:</b> <a href="https://reservations.ontarioparks.ca/account/all-bookings"><b>{res_num}</b></a>\n'
+                    f"🚗 <b>Vehicle:</b> {r['vehicle']} ({r['occupant']})\n"
+                    f"───────────────────"
+                )
+                html_lines.append(line)
+                
+                # Add inline keyboard button to cancel this booking
+                short_park = park_name.replace(" Provincial Park", "")
+                inline_keyboard.append([
+                    {"text": f"❌ Cancel {short_park} ({date_str})", "callback_data": f"cancel_btn:{res_num}|{short_park}"}
+                ])
+                
+            keyboard = {"inline_keyboard": inline_keyboard}
+            send_telegram_keyboard(token, chat_id, "\n".join(html_lines), keyboard)
         else:
             reply = f"❌ <b>Failed to list reservations:</b>\n<pre>{res.stdout[-300:] or res.stderr[-300:]}</pre>"
-        
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
+            send_telegram_message(token, chat_id, reply)
     except Exception as e:
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ Error: {e}")
 
@@ -318,7 +376,10 @@ def handle_command(command_text):
     cmd = args[0].lower().split("@")[0] # Strip bot username if present (e.g. /list@AnivaWayBot)
     
     if cmd == "/list":
-        threading.Thread(target=list_task, daemon=True).start()
+        threading.Thread(target=list_task, args=(False,), daemon=True).start()
+        
+    elif cmd == "/cancel_list":
+        threading.Thread(target=list_task, args=(True,), daemon=True).start()
         
     elif cmd == "/book":
         parks_keyboard = {
@@ -343,14 +404,14 @@ def handle_command(command_text):
         
     elif cmd in ["/help", "/start"]:
         reply = (
-            "🤖 <b>AnivaWay Bot Help Menu:</b>\n\n"
-            "📋 <b>Commands:</b>\n"
-            "• `/list` - List all active reservations.\n"
-            "• `/book` - Start interactive day-use booking wizard.\n"
-            "• `/cancel [Reservation ID]` - Cancel a specific booking.\n"
-            "  <i>Example:</i> <code>/cancel INOP26-7139739B1</code>"
+            "🤖 <b>AnivaWay Bot Main Menu:</b>\n\n"
+            "Use the buttons below to interact with the bot with minimal typing:\n"
+            "📋 <b>List Bookings</b> - Shows your active daily permits and lets you cancel them.\n"
+            "🌲 <b>Book Daily Permit</b> - Interactive booking wizard for your favorite kiting spots.\n"
+            "❌ <b>Cancel Booking</b> - Display your bookings to cancel them.\n"
+            "🔍 <b>Help</b> - Show this help menu."
         )
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply, MAIN_REPLY_KEYBOARD)
 
 def handle_callback(callback_query):
     token = config["telegram_token"]
@@ -424,6 +485,40 @@ def handle_callback(callback_query):
         
     elif data == "cancel_wizard":
         edit_telegram_keyboard(token, chat_id, message_id, "❌ <i>Booking wizard closed.</i>")
+        
+    elif data.startswith("cancel_btn:"):
+        payload = data.split(":", 1)[1]
+        res_num, park_name = payload.split("|", 1)
+        confirm_keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Yes, Cancel Booking", "callback_data": f"confirm_cancel:{res_num}"},
+                    {"text": "❌ No, Keep Booking", "callback_data": "keep_booking"}
+                ]
+            ]
+        }
+        edit_telegram_keyboard(
+            token, chat_id, message_id,
+            f"⚠️ <b>Are you sure you want to cancel the reservation for {park_name}?</b>\n"
+            f"Ticket: <code>{res_num}</code>\n\n"
+            f"<i>This action cannot be undone.</i>",
+            confirm_keyboard
+        )
+        
+    elif data.startswith("confirm_cancel:"):
+        res_num = data.split(":", 1)[1]
+        edit_telegram_keyboard(
+            token, chat_id, message_id,
+            f"⏳ <b>Initiating automated cancellation wizard...</b>\n"
+            f"Reservation: <code>{res_num}</code>"
+        )
+        threading.Thread(target=cancel_task, args=(res_num,), daemon=True).start()
+        
+    elif data == "keep_booking":
+        edit_telegram_keyboard(
+            token, chat_id, message_id,
+            "✅ <i>Booking has been kept and not modified.</i>"
+        )
 
     elif data in ["step_approve", "step_deny"]:
         status = "approved" if data == "step_approve" else "denied"
@@ -468,13 +563,23 @@ def main():
                 for update in result:
                     offset = update["update_id"] + 1
                     
-                    # Handle normal commands
+                    # Handle normal commands and reply keyboard buttons
                     message = update.get("message")
                     if message and str(message["chat"]["id"]) == CHAT_ID:
-                        text = message.get("text", "")
-                        if text.startswith("/"):
-                            print(f"Received command: {text}")
-                            handle_command(text)
+                        text = message.get("text", "").strip()
+                        if text:
+                            # Map reply keyboard labels to standard commands
+                            if text == "📋 List Bookings":
+                                handle_command("/list")
+                            elif text == "🌲 Book Daily Permit":
+                                handle_command("/book")
+                            elif text == "❌ Cancel Booking":
+                                handle_command("/cancel_list")
+                            elif text in ["🔍 Help", "🔍 Help Menu"]:
+                                handle_command("/help")
+                            elif text.startswith("/"):
+                                print(f"Received command: {text}")
+                                handle_command(text)
                             
                     # Handle keyboard selections
                     callback_query = update.get("callback_query")
