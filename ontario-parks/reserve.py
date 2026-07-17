@@ -365,7 +365,7 @@ def wait_for_any_element(page, selectors, timeout=12000):
     for loc in locators[1:]:
         combined = combined.or_(loc)
     try:
-        combined.first.wait_for(state="visible", timeout=timeout)
+        combined.first.wait_for(state="attached", timeout=timeout)
     except Exception as e:
         print("Warning: wait_for_any_element timed out:", e)
 
