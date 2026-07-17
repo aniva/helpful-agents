@@ -307,10 +307,10 @@ def list_task(for_cancellation=False):
                     alert_lines = []
                     for a in alerts:
                         desc = a["description"].replace("\n", " ")
-                        alert_lines.append(f"  • <b>{a['type']}:</b> {desc}")
+                        alert_lines.append(f"• <b>{a['type']}:</b> {desc}")
                     alerts_text = "\n".join(alert_lines)
                 else:
-                    alerts_text = "  ✅ No active alerts. Safe for swimming! 🏊‍♂️"
+                    alerts_text = "✅ No active alerts. Safe for swimming! 🏊‍♂️"
                     
                 line = (
                     f"<b>{idx}. {park_name}</b>\n"
@@ -318,7 +318,7 @@ def list_task(for_cancellation=False):
                     f'🎫 <b>Num:</b> <a href="https://reservations.ontarioparks.ca/account/all-bookings"><b>{res_num}</b></a>\n'
                     f"🚗 <b>Vehicle:</b> {r['vehicle']} ({r['occupant']})\n"
                     f"🚨 <b>Alerts:</b>\n{alerts_text}\n"
-                    f"───────────────────"
+                    f"────────────"
                 )
                 html_lines.append(line)
                 
