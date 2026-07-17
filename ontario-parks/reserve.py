@@ -1246,23 +1246,6 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
             browser.close()
             return False
             
-        print("Wizard Completed. Running preregistration automation...")
-        try:
-            preregister_btn = page.locator("button:has-text('Preregister'), a:has-text('Preregister')")
-            if preregister_btn.count() > 0 and preregister_btn.first.is_visible():
-                preregister_btn.first.click()
-                time.sleep(4)
-                page.wait_for_load_state("networkidle")
-                
-                preregister_now_btn = page.locator("button:has-text('Preregister now')")
-                if preregister_now_btn.count() > 0 and preregister_now_btn.first.is_visible():
-                    preregister_now_btn.first.click()
-                    time.sleep(4)
-                    page.wait_for_load_state("networkidle")
-                    print("Successfully Preregistered vehicle plate!")
-        except Exception as e:
-            print("Warning: Preregistration failed with issue:", e)
-            
         print("\nScanning page for reservation number...")
         conf_number = "Unknown"
         page_text = page.locator("body").inner_text()
@@ -1285,6 +1268,23 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         page.screenshot(path=screenshot_path)
         print(f"Saved confirmation screenshot to {screenshot_path}")
         
+        print("Wizard Completed. Running preregistration automation...")
+        try:
+            preregister_btn = page.locator("button:has-text('Preregister'), a:has-text('Preregister')")
+            if preregister_btn.count() > 0 and preregister_btn.first.is_visible():
+                preregister_btn.first.click()
+                time.sleep(4)
+                page.wait_for_load_state("networkidle")
+                
+                preregister_now_btn = page.locator("button:has-text('Preregister now')")
+                if preregister_now_btn.count() > 0 and preregister_now_btn.first.is_visible():
+                    preregister_now_btn.first.click()
+                    time.sleep(4)
+                    page.wait_for_load_state("networkidle")
+                    print("Successfully Preregistered vehicle plate!")
+        except Exception as e:
+            print("Warning: Preregistration failed with issue:", e)
+
         if conf_number == "Unknown":
             print("Error: Booking process failed or confirmation number could not be found.")
             browser.close()
