@@ -515,7 +515,6 @@ def send_progress(step_name, description, screenshot_path):
 
 def book_task(park, date):
     try:
-        transaction_time = datetime.datetime.now(datetime.timezone.utc)
         success = run_booking_flow(
             config,
             target_park_override=park,
@@ -524,13 +523,9 @@ def book_task(park, date):
             request_approval_callback=None,
             progress_callback=send_progress
         )
-        if success:
-            reply = "✅ <b>Booking process completed successfully!</b>"
-            threading.Thread(target=verify_email_after_transaction_task, args=("book", transaction_time), daemon=True).start()
-        else:
+        if not success:
             reply = f"❌ <b>Booking aborted or failed for {park} ({date}).</b>"
-            
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
+            send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
     except Exception as e:
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ <b>Booking failed with error:</b> {e}")
 
@@ -538,16 +533,11 @@ def cancel_task(res_num):
     try:
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to cancel reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a>...")
         
-        transaction_time = datetime.datetime.now(datetime.timezone.utc)
         # Run subprocess
         res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true"], capture_output=True, text=True)
-        if res.returncode == 0:
-            reply = f"✅ <b>Reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a> has been successfully cancelled!</b>"
-            threading.Thread(target=verify_email_after_transaction_task, args=("cancel", transaction_time), daemon=True).start()
-        else:
+        if res.returncode != 0:
             reply = f"❌ <b>Cancellation failed:</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
-            
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
+            send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
     except Exception as e:
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ Error: {e}")
 
