@@ -665,7 +665,9 @@ def list_reservations(email_user, password, headless=True):
                 page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=15000)
                 # Wait for any indicative loaded elements to appear on either page state (excluding base header layouts)
                 wait_for_any_element(page, ["section.compact-booking", "app-compact-booking", "text=No active reservations", "input#email"], timeout=12000)
-                if page.locator("section.compact-booking, app-compact-booking, text=No active reservations").count() > 0:
+                if (page.locator("section.compact-booking").count() > 0 or 
+                    page.locator("app-compact-booking").count() > 0 or 
+                    page.locator("text=No active reservations").count() > 0):
                     logged_in = True
                     print("Session cache hit!")
             except Exception as e:
@@ -733,7 +735,9 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
                 page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=15000)
                 # Wait for any indicative loaded elements to appear on either page state (excluding base header layouts)
                 wait_for_any_element(page, ["section.compact-booking", "app-compact-booking", "text=No active reservations", "input#email"], timeout=12000)
-                if page.locator("section.compact-booking, app-compact-booking, text=No active reservations").count() > 0:
+                if (page.locator("section.compact-booking").count() > 0 or 
+                    page.locator("app-compact-booking").count() > 0 or 
+                    page.locator("text=No active reservations").count() > 0):
                     logged_in = True
                     print("Session cache hit!")
             except Exception as e:
