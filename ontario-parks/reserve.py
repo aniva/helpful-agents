@@ -357,6 +357,18 @@ def dismiss_park_alerts(page):
     except Exception:
         pass
 
+def wait_for_any_element(page, selectors, timeout=12000):
+    if not selectors:
+        return
+    locators = [page.locator(s) for s in selectors]
+    combined = locators[0]
+    for loc in locators[1:]:
+        combined = combined.or_(loc)
+    try:
+        combined.first.wait_for(state="visible", timeout=timeout)
+    except Exception as e:
+        print("Warning: wait_for_any_element timed out:", e)
+
 def create_browser_context(browser, user_agent):
     auth_state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "auth_state.json")
     if os.path.exists(auth_state_path):
@@ -652,7 +664,7 @@ def list_reservations(email_user, password, headless=True):
             try:
                 page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=15000)
                 # Wait for any indicative loaded elements to appear on either page state
-                page.locator("section.compact-booking, app-compact-booking, text=No active reservations, text=Welcome,, input#email").first.wait_for(state="visible", timeout=12000)
+                wait_for_any_element(page, ["section.compact-booking", "app-compact-booking", "text=No active reservations", "text=Welcome,", "input#email"], timeout=12000)
                 if page.locator("text=Welcome,").count() > 0 or page.locator("section.compact-booking, app-compact-booking, text=No active reservations").count() > 0:
                     logged_in = True
                     print("Session cache hit!")
@@ -664,10 +676,7 @@ def list_reservations(email_user, password, headless=True):
             login_to_ontario_parks(page, email_user, password)
             print("Navigating to My Reservations...")
             page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
-            try:
-                page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
-            except Exception:
-                pass
+            wait_for_any_element(page, ["section.compact-booking", "app-compact-booking", "text=No active reservations"], timeout=12000)
         time.sleep(1)
         
         page_text = page.locator("body").inner_text()
@@ -723,7 +732,7 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
             try:
                 page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=15000)
                 # Wait for any indicative loaded elements to appear on either page state
-                page.locator("section.compact-booking, app-compact-booking, text=No active reservations, text=Welcome,, input#email").first.wait_for(state="visible", timeout=12000)
+                wait_for_any_element(page, ["section.compact-booking", "app-compact-booking", "text=No active reservations", "text=Welcome,", "input#email"], timeout=12000)
                 if page.locator("text=Welcome,").count() > 0 or page.locator("section.compact-booking, app-compact-booking, text=No active reservations").count() > 0:
                     logged_in = True
                     print("Session cache hit!")
@@ -735,10 +744,7 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
             login_to_ontario_parks(page, email_user, password)
             print("Navigating to My Reservations...")
             page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
-            try:
-                page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
-            except Exception:
-                pass
+            wait_for_any_element(page, ["section.compact-booking", "app-compact-booking", "text=No active reservations"], timeout=12000)
         time.sleep(1)
         
         # Locate card containing the target reservation number
