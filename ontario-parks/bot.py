@@ -300,11 +300,24 @@ def list_task(for_cancellation=False):
                 res_num = r["reservation_number"]
                 park_name = r["park"]
                 date_str = r["date"]
+                
+                from reserve import fetch_park_alerts
+                alerts = fetch_park_alerts(park_name)
+                if alerts:
+                    alert_lines = []
+                    for a in alerts:
+                        desc = a["description"].replace("\n", " ")
+                        alert_lines.append(f"  • <b>{a['type']}:</b> {desc}")
+                    alerts_text = "\n".join(alert_lines)
+                else:
+                    alerts_text = "  ✅ No active alerts. Safe for swimming! 🏊‍♂️"
+                    
                 line = (
                     f"<b>{idx}. {park_name}</b>\n"
                     f"📅 <b>Date:</b> {date_str}\n"
                     f'🎫 <b>Num:</b> <a href="https://reservations.ontarioparks.ca/account/all-bookings"><b>{res_num}</b></a>\n'
                     f"🚗 <b>Vehicle:</b> {r['vehicle']} ({r['occupant']})\n"
+                    f"🚨 <b>Alerts:</b>\n{alerts_text}\n"
                     f"───────────────────"
                 )
                 html_lines.append(line)

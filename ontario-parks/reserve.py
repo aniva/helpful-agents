@@ -369,6 +369,48 @@ def wait_for_any_element(page, selectors, timeout=12000):
     except Exception as e:
         print("Warning: wait_for_any_element timed out:", e)
 
+def fetch_park_alerts(park_name):
+    # Normalize name (e.g., "Sibbald Point" or "Sibbald Point Provincial Park" -> "sibbald point")
+    normalized_target = park_name.lower().replace("provincial park", "").strip()
+    
+    url = "https://www.ontarioparks.ca/alerts"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    alerts = []
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            # Loop through all p tags with strong
+            for p in soup.find_all("p"):
+                strong = p.find("strong")
+                if strong:
+                    text = strong.get_text().strip()
+                    if "provincial park" in text.lower():
+                        # Extract park name portion before the dash
+                        parts = text.split("-", 1)
+                        parsed_park_name = parts[0].strip()
+                        parsed_normalized = parsed_park_name.lower().replace("provincial park", "").strip()
+                        
+                        if parsed_normalized == normalized_target:
+                            alert_type = parts[1].strip() if len(parts) > 1 else "Notice"
+                            # Find the next sibling paragraph for description
+                            desc = ""
+                            next_sib = p.find_next_sibling()
+                            if next_sib and next_sib.name == "p":
+                                desc = next_sib.get_text().strip()
+                            
+                            alerts.append({
+                                "title": text,
+                                "type": alert_type,
+                                "description": desc
+                            })
+    except Exception as e:
+        print(f"Error fetching alerts: {e}")
+        
+    return alerts
+
 def create_browser_context(browser, user_agent):
     auth_state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "auth_state.json")
     if os.path.exists(auth_state_path):
@@ -1110,6 +1152,17 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         if email_body:
             email_verified = "Yes"
             
+    # Fetch park alerts
+    alerts = fetch_park_alerts(park_name)
+    if alerts:
+        alert_lines = []
+        for a in alerts:
+            desc = a["description"].replace("\n", " ")
+            alert_lines.append(f"• <b>{a['type']}:</b> {desc}")
+        alerts_text = "\n".join(alert_lines)
+    else:
+        alerts_text = "✅ No active alerts. Safe for swimming! 🏊‍♂️"
+
     msg_text = (
         f"🌊 <b>Ontario Park Reservation Confirmed!</b> 🌊\n\n"
         f"📍 <b>Park:</b> {park_name}\n"
@@ -1119,6 +1172,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         f"💰 <b>Amount:</b> {amount_str}\n"
         f"🔑 <b>Confirmation #:</b> <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{conf_number}</a>\n"
         f"📧 <b>Email verified:</b> {email_verified}\n\n"
+        f"🚨 <b>Park Alerts:</b>\n{alerts_text}\n\n"
         f"🌬️ <b>Wind Forecast:</b> Max {selected_park['max_speed']} kts (Gust: {selected_park['max_gust']} kts), Dir: {selected_park['dir']}, {selected_park['condition']}\n\n"
         f"Have a great kiting session! 🏄‍♂️💨"
     )
