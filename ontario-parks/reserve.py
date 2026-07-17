@@ -651,22 +651,23 @@ def list_reservations(email_user, password, headless=True):
             print("Attempting direct navigation with cached session...")
             try:
                 page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=15000)
-                time.sleep(2)
-                if "login" not in page.url and "account" in page.url:
+                # Wait for any indicative loaded elements to appear on either page state
+                page.locator("section.compact-booking, app-compact-booking, text=No active reservations, text=Welcome,, input#email").first.wait_for(state="visible", timeout=12000)
+                if page.locator("text=Welcome,").count() > 0 or page.locator("section.compact-booking, app-compact-booking, text=No active reservations").count() > 0:
                     logged_in = True
                     print("Session cache hit!")
-            except Exception:
-                pass
+            except Exception as e:
+                print("Direct navigation failed:", e)
                 
         if not logged_in:
             print("Session cache miss or expired, performing full login...")
             login_to_ontario_parks(page, email_user, password)
             print("Navigating to My Reservations...")
             page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
-        try:
-            page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
-        except Exception:
-            pass
+            try:
+                page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
+            except Exception:
+                pass
         time.sleep(1)
         
         page_text = page.locator("body").inner_text()
@@ -721,22 +722,23 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
             print("Attempting direct navigation with cached session...")
             try:
                 page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=15000)
-                time.sleep(2)
-                if "login" not in page.url and "account" in page.url:
+                # Wait for any indicative loaded elements to appear on either page state
+                page.locator("section.compact-booking, app-compact-booking, text=No active reservations, text=Welcome,, input#email").first.wait_for(state="visible", timeout=12000)
+                if page.locator("text=Welcome,").count() > 0 or page.locator("section.compact-booking, app-compact-booking, text=No active reservations").count() > 0:
                     logged_in = True
                     print("Session cache hit!")
-            except Exception:
-                pass
+            except Exception as e:
+                print("Direct navigation failed:", e)
                 
         if not logged_in:
             print("Session cache miss or expired, performing full login...")
             login_to_ontario_parks(page, email_user, password)
             print("Navigating to My Reservations...")
             page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
-        try:
-            page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
-        except Exception:
-            pass
+            try:
+                page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
+            except Exception:
+                pass
         time.sleep(1)
         
         # Locate card containing the target reservation number
@@ -1105,7 +1107,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         f"🚗 <b>Vehicle:</b> {config['vehicle_plate']} ({config['vehicle_province']})\n"
         f"🎫 <b>Permit:</b> {config['permit_number']}\n"
         f"💰 <b>Amount:</b> {amount_str}\n"
-        f"🔑 <b>Confirmation #:</b> <code>{conf_number}</code>\n"
+        f"🔑 <b>Confirmation #:</b> <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{conf_number}</a>\n"
         f"📧 <b>Email verified:</b> {email_verified}\n\n"
         f"🌬️ <b>Wind Forecast:</b> Max {selected_park['max_speed']} kts (Gust: {selected_park['max_gust']} kts), Dir: {selected_park['dir']}, {selected_park['condition']}\n\n"
         f"Have a great kiting session! 🏄‍♂️💨"
