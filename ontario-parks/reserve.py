@@ -358,21 +358,12 @@ def dismiss_park_alerts(page):
         pass
 
 def login_to_ontario_parks(page, email_user, password):
-    print("Navigating to homepage first...")
-    page.goto("https://reservations.ontarioparks.ca/", timeout=40000)
-    time.sleep(3)
-    
-    consent_btn = page.locator("button:has-text('I consent'), button:has-text('I Consent')")
-    if consent_btn.count() > 0:
-        consent_btn.first.click()
-        time.sleep(1)
-        
     print("Navigating to login page...")
     page.goto("https://reservations.ontarioparks.ca/login", timeout=40000)
     
     # Wait for either input#email OR redirect to /account
     is_logged_in = False
-    for _ in range(30):
+    for _ in range(20):
         if "account" in page.url:
             is_logged_in = True
             break
@@ -384,11 +375,11 @@ def login_to_ontario_parks(page, email_user, password):
         print("Already logged in (redirected to account).")
         return
     
-    # Click consent if present again
+    # Click consent if present
     consent_btn = page.locator("button:has-text('I consent'), button:has-text('I Consent')")
-    if consent_btn.count() > 0:
+    if consent_btn.count() > 0 and consent_btn.first.is_visible():
         consent_btn.first.click()
-        time.sleep(1)
+        time.sleep(0.5)
         
     print("Submitting credentials...")
     page.locator("input#email").first.fill(email_user)
@@ -396,7 +387,10 @@ def login_to_ontario_parks(page, email_user, password):
     page.locator("#loginButton").first.click()
     
     print("Submitted credentials, waiting for navigation...")
-    time.sleep(6)
+    try:
+        page.wait_for_url("**/account**", timeout=8000)
+    except Exception:
+        time.sleep(3)
     page.wait_for_load_state("networkidle")
 
 def handle_step_feedback(step_name, description, screenshot_name, page, request_approval_callback, progress_callback):
@@ -627,10 +621,10 @@ def list_reservations(email_user, password, headless=True):
         print("Navigating to My Reservations...")
         page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
         try:
-            page.locator("text=My Reservations, text=Upcoming").first.wait_for(state="visible", timeout=12000)
+            page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
         except Exception:
             pass
-        time.sleep(3)
+        time.sleep(1)
         
         page_text = page.locator("body").inner_text()
         
@@ -688,10 +682,10 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
         print("Navigating to My Reservations...")
         page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
         try:
-            page.locator("text=My Reservations, text=Upcoming").first.wait_for(state="visible", timeout=12000)
+            page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
         except Exception:
             pass
-        time.sleep(3)
+        time.sleep(1)
         
         # Locate card containing the target reservation number
         card = page.locator("section.compact-booking, app-compact-booking, mat-card, .mat-card", has_text=target_res_num)
