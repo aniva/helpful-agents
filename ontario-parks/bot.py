@@ -540,11 +540,28 @@ def handle_callback(callback_query):
             except Exception:
                 pass
 
+def set_bot_commands(token):
+    url = f"https://api.telegram.org/bot{token}/setMyCommands"
+    payload = {
+        "commands": [
+            {"command": "list", "description": "📋 List active permits & cancel them"},
+            {"command": "book", "description": "🌲 Book daily permit"},
+            {"command": "help", "description": "🔍 Show main menu / help menu"}
+        ]
+    }
+    try:
+        res = requests.post(url, json=payload, timeout=10)
+        print("setMyCommands response:", res.json())
+    except Exception as e:
+        print("Failed to set bot commands:", e)
+
 def main():
     global config
     config = load_config()
     TOKEN = config["telegram_token"]
     CHAT_ID = config["telegram_chat_id"]
+    
+    set_bot_commands(TOKEN)
     
     print(f"Starting Telegram Bot command listener for chat ID: {CHAT_ID}...")
     send_telegram_message(TOKEN, CHAT_ID, "🤖 AnivaWay Bot is online and listening for commands!")
@@ -580,6 +597,9 @@ def main():
                             elif text.startswith("/"):
                                 print(f"Received command: {text}")
                                 handle_command(text)
+                            else:
+                                print(f"Received unrecognized text: {text}, showing menu")
+                                handle_command("/help")
                             
                     # Handle keyboard selections
                     callback_query = update.get("callback_query")
