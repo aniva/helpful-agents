@@ -355,12 +355,12 @@ def book_task(park, date):
 
 def cancel_task(res_num):
     try:
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to cancel reservation <code>{res_num}</code>...")
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to cancel reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a>...")
         
         # Run subprocess
         res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true"], capture_output=True, text=True)
         if res.returncode == 0:
-            reply = f"✅ <b>Reservation <code>{res_num}</code> has been successfully cancelled!</b>"
+            reply = f"✅ <b>Reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a> has been successfully cancelled!</b>"
         else:
             reply = f"❌ <b>Cancellation failed:</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
             
@@ -500,7 +500,7 @@ def handle_callback(callback_query):
         edit_telegram_keyboard(
             token, chat_id, message_id,
             f"⚠️ <b>Are you sure you want to cancel the reservation for {park_name}?</b>\n"
-            f"Ticket: <code>{res_num}</code>\n\n"
+            f"Ticket: <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a>\n\n"
             f"<i>This action cannot be undone.</i>",
             confirm_keyboard
         )
@@ -510,7 +510,7 @@ def handle_callback(callback_query):
         edit_telegram_keyboard(
             token, chat_id, message_id,
             f"⏳ <b>Initiating automated cancellation wizard...</b>\n"
-            f"Reservation: <code>{res_num}</code>"
+            f"Reservation: <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a>"
         )
         threading.Thread(target=cancel_task, args=(res_num,), daemon=True).start()
         
