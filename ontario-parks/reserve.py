@@ -260,6 +260,11 @@ def resolve_telegram_chat_id(token):
     print("\n[Telegram Config] Timeout: Could not find any recent messages. Please try again.")
     return None
 
+def escape_html(text):
+    if not text:
+        return ""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 def send_telegram_message(token, chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
@@ -989,13 +994,16 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
                         # Poll and post cancellation email verification
                         result = check_recent_email_after_transaction(config, "cancel", transaction_time)
                         if result["status"] == "found":
+                            safe_sender = escape_html(result['sender'])
+                            safe_subject = escape_html(result['subject'])
+                            safe_summary = escape_html(result['summary'])
                             verify_msg = (
                                 f"✉️ <b>Ontario Parks Email Verification:</b>\n"
                                 f"📥 Checked for email from Ontario Parks.\n\n"
-                                f"📧 <b>Sender:</b> {result['sender']}\n"
+                                f"📧 <b>Sender:</b> {safe_sender}\n"
                                 f"📅 <b>Time:</b> {result['time']}\n"
-                                f"📝 <b>Subject:</b> {result['subject']}\n"
-                                f"🔍 <b>Summary:</b> {result['summary']}\n\n"
+                                f"📝 <b>Subject:</b> {safe_subject}\n"
+                                f"🔍 <b>Summary:</b> {safe_summary}\n\n"
                                 f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
                             )
                         elif result["status"] == "not_found":
@@ -1366,13 +1374,16 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         # Poll for new transaction email and post verification status
         result = check_recent_email_after_transaction(config, "book", transaction_time)
         if result["status"] == "found":
+            safe_sender = escape_html(result['sender'])
+            safe_subject = escape_html(result['subject'])
+            safe_summary = escape_html(result['summary'])
             verify_msg = (
                 f"✉️ <b>Ontario Parks Email Verification:</b>\n"
                 f"📥 Checked for email from Ontario Parks.\n\n"
-                f"📧 <b>Sender:</b> {result['sender']}\n"
+                f"📧 <b>Sender:</b> {safe_sender}\n"
                 f"📅 <b>Time:</b> {result['time']}\n"
-                f"📝 <b>Subject:</b> {result['subject']}\n"
-                f"🔍 <b>Summary:</b> {result['summary']}\n\n"
+                f"📝 <b>Subject:</b> {safe_subject}\n"
+                f"🔍 <b>Summary:</b> {safe_summary}\n\n"
                 f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
             )
         elif result["status"] == "not_found":
