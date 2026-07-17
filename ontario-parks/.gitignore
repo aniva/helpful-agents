@@ -1,4 +1,6 @@
 ontario_parks_config.json
+active_reservations.json
+auth_state.json
 .env
 *.png
 *.log
