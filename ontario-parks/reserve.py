@@ -357,6 +357,27 @@ def dismiss_park_alerts(page):
     except Exception:
         pass
 
+def create_browser_context(browser, user_agent):
+    auth_state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "auth_state.json")
+    if os.path.exists(auth_state_path):
+        try:
+            context = browser.new_context(
+                storage_state=auth_state_path,
+                user_agent=user_agent,
+                viewport={"width": 1280, "height": 800},
+                extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
+            )
+            return context, True
+        except Exception as e:
+            print("Warning: Failed to load auth state, creating clean context:", e)
+            
+    context = browser.new_context(
+        user_agent=user_agent,
+        viewport={"width": 1280, "height": 800},
+        extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
+    )
+    return context, False
+
 def login_to_ontario_parks(page, email_user, password):
     print("Navigating to login page...")
     page.goto("https://reservations.ontarioparks.ca/login", timeout=40000)
@@ -373,6 +394,10 @@ def login_to_ontario_parks(page, email_user, password):
         
     if is_logged_in or "account" in page.url:
         print("Already logged in (redirected to account).")
+        try:
+            page.context.storage_state(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "auth_state.json"))
+        except Exception:
+            pass
         return
     
     # Click consent if present
@@ -391,6 +416,14 @@ def login_to_ontario_parks(page, email_user, password):
         page.wait_for_url("**/account**", timeout=8000)
     except Exception:
         time.sleep(3)
+    page.wait_for_load_state("networkidle")
+    
+    # Save storage state on successful login
+    try:
+        page.context.storage_state(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "auth_state.json"))
+        print("Authentication state saved successfully.")
+    except Exception as e:
+        print("Warning: Could not save auth state:", e)
     page.wait_for_load_state("networkidle")
 
 def handle_step_feedback(step_name, description, screenshot_name, page, request_approval_callback, progress_callback):
@@ -608,18 +641,28 @@ def list_reservations(email_user, password, headless=True):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        context = browser.new_context(
-            user_agent=user_agent,
-            viewport={"width": 1280, "height": 800},
-            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
-        )
+        
+        context, has_auth = create_browser_context(browser, user_agent)
         page = context.new_page()
         page.add_init_script("delete navigator.__proto__.webdriver;")
         
-        login_to_ontario_parks(page, email_user, password)
-        
-        print("Navigating to My Reservations...")
-        page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
+        logged_in = False
+        if has_auth:
+            print("Attempting direct navigation with cached session...")
+            try:
+                page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=15000)
+                time.sleep(2)
+                if "login" not in page.url and "account" in page.url:
+                    logged_in = True
+                    print("Session cache hit!")
+            except Exception:
+                pass
+                
+        if not logged_in:
+            print("Session cache miss or expired, performing full login...")
+            login_to_ontario_parks(page, email_user, password)
+            print("Navigating to My Reservations...")
+            page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
         try:
             page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
         except Exception:
@@ -669,18 +712,27 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        context = browser.new_context(
-            user_agent=user_agent,
-            viewport={"width": 1280, "height": 800},
-            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
-        )
+        context, has_auth = create_browser_context(browser, user_agent)
         page = context.new_page()
         page.add_init_script("delete navigator.__proto__.webdriver;")
         
-        login_to_ontario_parks(page, email_user, password)
-        
-        print("Navigating to My Reservations...")
-        page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
+        logged_in = False
+        if has_auth:
+            print("Attempting direct navigation with cached session...")
+            try:
+                page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=15000)
+                time.sleep(2)
+                if "login" not in page.url and "account" in page.url:
+                    logged_in = True
+                    print("Session cache hit!")
+            except Exception:
+                pass
+                
+        if not logged_in:
+            print("Session cache miss or expired, performing full login...")
+            login_to_ontario_parks(page, email_user, password)
+            print("Navigating to My Reservations...")
+            page.goto("https://reservations.ontarioparks.ca/account/all-bookings", timeout=40000)
         try:
             page.locator("section.compact-booking, app-compact-booking, text=No active reservations").first.wait_for(state="visible", timeout=12000)
         except Exception:
@@ -851,11 +903,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=is_headless)
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        context = browser.new_context(
-            user_agent=user_agent,
-            viewport={"width": 1280, "height": 800},
-            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
-        )
+        context, has_auth = create_browser_context(browser, user_agent)
         page = context.new_page()
         page.add_init_script("delete navigator.__proto__.webdriver;")
         
