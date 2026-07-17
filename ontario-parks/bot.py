@@ -7,10 +7,176 @@ import sys
 import threading
 import datetime
 import calendar
+import imaplib
+import email
+from email.header import decode_header
+import email.utils
+from bs4 import BeautifulSoup
 
 # Add current dir to path to import reserve
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from reserve import load_config, send_telegram_message, run_booking_flow
+
+def check_recent_email_after_transaction(config, transaction_type, transaction_time):
+    """
+    Polls IMAP for a new Ontario Parks email.
+    transaction_type: 'book' or 'cancel'
+    transaction_time: datetime.datetime (aware, in UTC)
+    """
+    email_user = config.get("email")
+    app_password = config.get("gmail_app_password")
+    if not email_user or not app_password:
+        return {
+            "status": "skipped",
+            "message": "⚠️ Email verification skipped: Gmail credentials not configured."
+        }
+        
+    print(f"Polling for new Ontario Parks email (type: {transaction_type})...")
+    
+    start_poll = time.time()
+    while time.time() - start_poll < 60:
+        try:
+            mail = imaplib.IMAP4_SSL("imap.gmail.com")
+            mail.login(email_user, app_password)
+            mail.select("inbox")
+            
+            search_query = 'OR (FROM "confirmations@camis.com") (SUBJECT "Ontario Parks")'
+            status, messages = mail.search(None, search_query)
+            if status != "OK":
+                status, messages = mail.search(None, '(SUBJECT "Ontario Parks")')
+                
+            mail_ids = messages[0].split()
+            if mail_ids:
+                latest_id = mail_ids[-1]
+                status, data = mail.fetch(latest_id, "(RFC822)")
+                if status == "OK":
+                    raw_email = data[0][1]
+                    msg = email.message_from_bytes(raw_email)
+                    
+                    subject_header = msg["Subject"] or ""
+                    subject, encoding = decode_header(subject_header)[0]
+                    if isinstance(subject, bytes):
+                        subject = subject.decode(encoding or "utf-8", errors="ignore")
+                        
+                    sender = msg["From"] or ""
+                    date_header = msg["Date"] or ""
+                    
+                    try:
+                        email_dt = email.utils.parsedate_to_datetime(date_header)
+                    except Exception:
+                        email_dt = datetime.datetime.now(datetime.timezone.utc)
+                    
+                    # Ensure email_dt is in UTC
+                    if email_dt.tzinfo is None:
+                        email_dt = email_dt.replace(tzinfo=datetime.timezone.utc)
+                    else:
+                        email_dt = email_dt.astimezone(datetime.timezone.utc)
+                        
+                    # Check if this email is indeed from after our transaction (allowing 60s clock skew)
+                    if email_dt >= transaction_time - datetime.timedelta(seconds=60):
+                        # Extract summary
+                        body = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                content_type = part.get_content_type()
+                                content_disposition = str(part.get("Content-Disposition"))
+                                if content_type == "text/plain" and "attachment" not in content_disposition:
+                                    body = part.get_payload(decode=True).decode(errors="ignore")
+                                    break
+                        else:
+                            body = msg.get_payload(decode=True).decode(errors="ignore")
+                            
+                        soup = BeautifulSoup(body, "html.parser")
+                        text_content = soup.get_text()
+                        
+                        # Cleanup text content for summary
+                        lines = [line.strip() for line in text_content.split("\n") if line.strip()]
+                        summary_lines = []
+                        # Look for lines containing keywords
+                        for line in lines:
+                            if any(k in line.lower() for k in ["confirmation", "cancel", "permit", "vehicle", "plate", "amount", "total", "park", "status"]):
+                                if len(line) < 100 and line not in summary_lines:
+                                    summary_lines.append(line)
+                        
+                        summary = ", ".join(summary_lines[:4])
+                        if not summary:
+                            summary = f"Subject: {subject}"
+                            
+                        # Determine conclusion
+                        conclusion = "all good"
+                        lower_subject = subject.lower()
+                        lower_body = text_content.lower()
+                        
+                        if transaction_type == "book":
+                            if "cancel" in lower_subject or "cancel" in lower_body:
+                                conclusion = "some issues to check (booking resulted in cancellation email?)"
+                            elif "warning" in lower_body or "action required" in lower_body or "error" in lower_body:
+                                conclusion = "some issues to check (warnings found in email)"
+                        elif transaction_type == "cancel":
+                            if "confirmation" in lower_subject and "cancel" not in lower_subject and "cancel" not in lower_body:
+                                conclusion = "some issues to check (cancellation resulted in confirmation email?)"
+                                
+                        mail.close()
+                        mail.logout()
+                        
+                        # Local time formatting for output
+                        local_dt = email_dt.astimezone()
+                        time_str = local_dt.strftime("%I:%M:%S %p")
+                        
+                        return {
+                            "status": "found",
+                            "subject": subject,
+                            "sender": sender,
+                            "time": time_str,
+                            "summary": summary,
+                            "conclusion": conclusion
+                        }
+            mail.close()
+            mail.logout()
+        except Exception as e:
+            print(f"IMAP poll error: {e}")
+            
+        time.sleep(5)
+        
+    return {
+        "status": "not_found",
+        "message": "⚠️ Checked for email from Ontario Parks, but no new emails received within 60 seconds.",
+        "conclusion": "some issues to check (no email received)"
+    }
+
+def verify_email_after_transaction_task(transaction_type, transaction_time):
+    # Wait first for email latency, e.g. 5 seconds
+    time.sleep(5)
+    
+    current_config = load_config()
+    token = current_config["telegram_token"]
+    chat_id = current_config["telegram_chat_id"]
+    
+    # Check email
+    result = check_recent_email_after_transaction(current_config, transaction_type, transaction_time)
+    
+    if result["status"] == "found":
+        msg_text = (
+            f"✉️ <b>Ontario Parks Email Verification:</b>\n"
+            f"📥 Checked for email from Ontario Parks.\n\n"
+            f"📧 <b>Sender:</b> {result['sender']}\n"
+            f"📅 <b>Time:</b> {result['time']}\n"
+            f"📝 <b>Subject:</b> {result['subject']}\n"
+            f"🔍 <b>Summary:</b> {result['summary']}\n\n"
+            f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
+        )
+    elif result["status"] == "not_found":
+        msg_text = (
+            f"✉️ <b>Ontario Parks Email Verification:</b>\n"
+            f"📥 Checked for email from Ontario Parks.\n\n"
+            f"{result['message']}\n\n"
+            f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
+        )
+    else:
+        # skipped
+        msg_text = result["message"]
+        
+    send_telegram_message(token, chat_id, msg_text)
 
 def format_reservations_html():
     json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_reservations.json")
@@ -349,6 +515,7 @@ def send_progress(step_name, description, screenshot_path):
 
 def book_task(park, date):
     try:
+        transaction_time = datetime.datetime.now(datetime.timezone.utc)
         success = run_booking_flow(
             config,
             target_park_override=park,
@@ -359,6 +526,7 @@ def book_task(park, date):
         )
         if success:
             reply = "✅ <b>Booking process completed successfully!</b>"
+            threading.Thread(target=verify_email_after_transaction_task, args=("book", transaction_time), daemon=True).start()
         else:
             reply = f"❌ <b>Booking aborted or failed for {park} ({date}).</b>"
             
@@ -370,10 +538,12 @@ def cancel_task(res_num):
     try:
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to cancel reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a>...")
         
+        transaction_time = datetime.datetime.now(datetime.timezone.utc)
         # Run subprocess
         res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true"], capture_output=True, text=True)
         if res.returncode == 0:
             reply = f"✅ <b>Reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a> has been successfully cancelled!</b>"
+            threading.Thread(target=verify_email_after_transaction_task, args=("cancel", transaction_time), daemon=True).start()
         else:
             reply = f"❌ <b>Cancellation failed:</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
             
