@@ -1120,8 +1120,10 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
     
     selected_park = None
     if target_park_override:
+        clean_override = target_park_override.split("(")[0].replace("Provincial Park", "").strip().lower()
         for p in ranked_parks:
-            if target_park_override.lower() in p["name"].lower():
+            clean_p = p["name"].replace("Provincial Park", "").strip().lower()
+            if clean_override in clean_p or clean_p in clean_override:
                 selected_park = p
                 break
         if not selected_park:

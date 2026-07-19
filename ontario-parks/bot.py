@@ -182,7 +182,7 @@ def get_recent_parks_keyboard():
         except Exception:
             pass
     if not recent:
-        recent = ["Sibbald Point", "Presqu'ile", "Wasaga Beach (Area 6)"]
+        recent = ["Sibbald Point", "Presqu'ile", "Wasaga Beach"]
         
     rows = []
     row = []
