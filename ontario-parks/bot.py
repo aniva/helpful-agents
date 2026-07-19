@@ -480,6 +480,55 @@ def check_and_notify_checkin_reminders():
         pass
 
 
+def add_cached_booking(res_num, park_name, date_str):
+    json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_reservations.json")
+    reservations = []
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                reservations = json.load(f)
+        except Exception:
+            pass
+            
+    # Check if already exists to avoid duplicates
+    for r in reservations:
+        if r.get("reservation_number") == res_num:
+            return
+            
+    # Add new booking
+    reservations.append({
+        "reservation_number": res_num,
+        "park": park_name,
+        "date": date_str,
+        "vehicle": config.get("vehicle_plate", "ATXJ307"),
+        "occupant": "I will be the occupant"
+    })
+    
+    try:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(reservations, f, indent=2)
+    except Exception as e:
+        print(f"Error writing cached booking: {e}")
+
+def remove_cached_booking(res_num):
+    json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_reservations.json")
+    if not os.path.exists(json_path):
+        return
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            reservations = json.load(f)
+    except Exception:
+        return
+        
+    filtered = [r for r in reservations if r.get("reservation_number") != res_num]
+    
+    try:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(filtered, f, indent=2)
+    except Exception as e:
+        print(f"Error removing cached booking: {e}")
+
+
 def format_reservations_html():
     json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_reservations.json")
     if not os.path.exists(json_path):
@@ -839,8 +888,12 @@ def book_task(park, date):
     try:
         # Use our Popen runner that parses [PROGRESS] and enforces a 360-second watchdog timeout
         args = [sys.executable, "reserve.py", "book", "--park", park, "--date", date, "--headless", "true", "--skip-email-check"]
-        success = run_subprocess_with_progress(args, f"Booking {park}", 360)
+        metadata = {"conf_number": "Unknown"}
+        success = run_subprocess_with_progress(args, f"Booking {park}", 360, out_metadata=metadata)
         if success:
+            conf_num = metadata.get("conf_number", "Unknown")
+            if conf_num != "Unknown":
+                add_cached_booking(conf_num, park, date)
             send_telegram_message(token, chat_id, f"✅ <b>Booking successfully processed for {park} ({date})!</b>\nWe are now verifying the transaction confirmation email...")
             threading.Thread(target=background_email_monitor, args=("book", transaction_time), daemon=True).start()
     finally:
@@ -860,6 +913,7 @@ def cancel_task(res_num):
         # Run subprocess with timeout of 90s
         res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true", "--skip-email-check"], capture_output=True, text=True, timeout=90)
         if res.returncode == 0:
+            remove_cached_booking(res_num)
             threading.Thread(target=background_email_monitor, args=("cancel", transaction_time), daemon=True).start()
         else:
             global LAST_ERROR
@@ -1010,6 +1064,52 @@ def handle_callback(callback_query):
             date_label = "tomorrow"
         elif date_val == "day_after":
             date_label = "day after tomorrow"
+            
+        # Resolve date_val to YYYY-MM-DD format for duplicate checks
+        target_date_str = date_val
+        today_dt = datetime.date.today()
+        if date_val == "today":
+            target_date_str = today_dt.strftime("%Y-%m-%d")
+        elif date_val == "tomorrow":
+            target_date_str = (today_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        elif date_val == "day_after":
+            target_date_str = (today_dt + datetime.timedelta(days=2)).strftime("%Y-%m-%d")
+            
+        # Check active reservations cache for duplicate date bookings
+        json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_reservations.json")
+        has_same_park = False
+        has_diff_park = False
+        existing_park = ""
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    cached_res = json.load(f)
+                for r in cached_res:
+                    if r.get("date") == target_date_str:
+                        existing_park = r.get("park", "")
+                        norm_existing = existing_park.lower().replace("provincial park", "").strip()
+                        norm_target = park_name.lower().replace("provincial park", "").strip()
+                        if norm_existing == norm_target:
+                            has_same_park = True
+                        else:
+                            has_diff_park = True
+            except Exception:
+                pass
+                
+        if has_same_park:
+            edit_telegram_keyboard(
+                token, chat_id, message_id, 
+                f"🚫 <b>Booking Blocked:</b> You already have an active permit for <b>{park_name}</b> on <b>{date_label}</b> ({target_date_str}).\n\n"
+                f"Duplicate bookings for the same park on the same day are not allowed."
+            )
+            return
+            
+        if has_diff_park:
+            send_telegram_message(
+                token, chat_id, 
+                f"⚠️ <b>Notice:</b> You already have an active permit for a different park (<b>{existing_park}</b>) on <b>{date_label}</b> ({target_date_str}).\n\n"
+                f"Proceeding with the booking for <b>{park_name}</b> as requested..."
+            )
             
         edit_telegram_keyboard(
             token, chat_id, message_id, 
