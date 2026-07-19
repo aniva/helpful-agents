@@ -43,6 +43,80 @@ def is_future_or_today(date_str):
     return False
 
 USER_STATE = None
+op_lock = threading.Lock()
+CURRENT_OPERATION = None
+LAST_ERROR = "No errors recorded."
+
+def acquire_operation(op_name):
+    global CURRENT_OPERATION
+    with op_lock:
+        if CURRENT_OPERATION is not None:
+            return False
+        CURRENT_OPERATION = op_name
+        return True
+
+def release_operation():
+    global CURRENT_OPERATION
+    with op_lock:
+        CURRENT_OPERATION = None
+
+def run_subprocess_with_progress(args, op_name, timeout_secs):
+    global LAST_ERROR
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    
+    proc = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1
+    )
+    
+    start_time = time.time()
+    timer = threading.Timer(timeout_secs, proc.kill)
+    try:
+        timer.start()
+        stdout_lines = []
+        for line in iter(proc.stdout.readline, ""):
+            stdout_lines.append(line)
+            if line.startswith("[PROGRESS]"):
+                parts = line.strip().split(" | ")
+                step_name = ""
+                desc = ""
+                img_name = ""
+                for part in parts:
+                    if part.startswith("[PROGRESS] Step: "):
+                        step_name = part.replace("[PROGRESS] Step: ", "")
+                    elif part.startswith("Desc: "):
+                        desc = part.replace("Desc: ", "")
+                    elif part.startswith("Image: "):
+                        img_name = part.replace("Image: ", "")
+                if step_name and img_name:
+                    img_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), img_name)
+                    send_progress(step_name, desc, img_path)
+                    
+        proc.wait()
+        
+        if proc.returncode != 0:
+            stderr = proc.stderr.read()
+            stdout_full = "".join(stdout_lines)
+            if proc.returncode == -9 or proc.returncode == 15 or (time.time() - start_time >= timeout_secs):
+                LAST_ERROR = f"Operation '{op_name}' timed out after {timeout_secs} seconds.\nSTDOUT:\n{stdout_full}\nSTDERR:\n{stderr}"
+                send_telegram_message(token, chat_id, f"❌ <b>{op_name} timed out ({timeout_secs}s limit).</b>")
+            else:
+                LAST_ERROR = f"Command failed with exit code {proc.returncode}.\nSTDOUT:\n{stdout_full}\nSTDERR:\n{stderr}"
+                display_err = stderr[-300:] or stdout_full[-300:]
+                send_telegram_message(token, chat_id, f"❌ <b>{op_name} failed:</b>\n<pre>{escape_html(display_err)}</pre>\nUse 'Check Errors' for full details.")
+            return False
+            
+        return True
+    except Exception as e:
+        LAST_ERROR = f"Exception during subprocess run: {str(e)}"
+        send_telegram_message(token, chat_id, f"❌ <b>{op_name} execution error:</b> {e}")
+        return False
+    finally:
+        timer.cancel()
 
 def add_recent_park(park_name):
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recent_parks.json")
@@ -291,6 +365,7 @@ MAIN_REPLY_KEYBOARD = {
         ],
         [
             {"text": "❌ Cancel Booking"},
+            {"text": "❓ Check Errors"},
             {"text": "🔍 Help"}
         ]
     ],
@@ -508,15 +583,18 @@ def get_quick_dates_keyboard(park_name):
     return keyboard
 
 def list_task(for_cancellation=False):
-    try:
-        token = config["telegram_token"]
-        chat_id = config["telegram_chat_id"]
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    if not acquire_operation("Listing active permits"):
+        send_telegram_message(token, chat_id, f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>). Please wait for it to complete.")
+        return
         
+    try:
         # Send status update
         send_telegram_message(token, chat_id, "🔍 Checking active reservations...")
         
-        # Run subprocess
-        res = subprocess.run([sys.executable, "reserve.py", "list"], capture_output=True, text=True)
+        # Run subprocess with timeout of 60 seconds
+        res = subprocess.run([sys.executable, "reserve.py", "list"], capture_output=True, text=True, timeout=60)
         if res.returncode == 0:
             json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_reservations.json")
             if os.path.exists(json_path):
@@ -574,10 +652,18 @@ def list_task(for_cancellation=False):
             keyboard = {"inline_keyboard": inline_keyboard}
             send_telegram_keyboard(token, chat_id, "\n".join(html_lines), keyboard)
         else:
-            reply = f"❌ <b>Failed to list reservations:</b>\n<pre>{res.stdout[-300:] or res.stderr[-300:]}</pre>"
+            global LAST_ERROR
+            LAST_ERROR = f"List Command failed with code {res.returncode}.\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+            reply = f"❌ <b>Failed to list reservations:</b>\n<pre>{escape_html(res.stdout[-300:] or res.stderr[-300:])}</pre>\nUse 'Check Errors' button for details."
             send_telegram_message(token, chat_id, reply)
+    except subprocess.TimeoutExpired:
+        LAST_ERROR = "Listing bookings operation timed out (60 seconds limit)."
+        send_telegram_message(token, chat_id, "❌ <b>Listing bookings operation timed out (60s limit).</b>")
     except Exception as e:
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ Error: {e}")
+        LAST_ERROR = f"Exception in list task: {str(e)}"
+        send_telegram_message(token, chat_id, f"❌ Error: {e}")
+    finally:
+        release_operation()
 
 def send_progress(step_name, description, screenshot_path):
     token = config["telegram_token"]
@@ -591,32 +677,46 @@ def send_progress(step_name, description, screenshot_path):
     send_telegram_photo(token, chat_id, caption, screenshot_path)
 
 def book_task(park, date):
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    if not acquire_operation(f"Booking {park} for {date}"):
+        send_telegram_message(token, chat_id, f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>). Please wait for it to complete.")
+        return
+        
     try:
-        success = run_booking_flow(
-            config,
-            target_park_override=park,
-            target_date_override=date,
-            is_headless=True,
-            request_approval_callback=None,
-            progress_callback=send_progress
-        )
-        if not success:
-            reply = f"❌ <b>Booking aborted or failed for {park} ({date}).</b>"
-            send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
-    except Exception as e:
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ <b>Booking failed with error:</b> {e}")
+        # Use our Popen runner that parses [PROGRESS] and enforces a 360-second watchdog timeout
+        args = [sys.executable, "reserve.py", "book", "--park", park, "--date", date, "--headless", "true"]
+        success = run_subprocess_with_progress(args, f"Booking {park}", 360)
+        if success:
+            send_telegram_message(token, chat_id, f"✅ <b>Booking successfully processed for {park} ({date})!</b>\nWe are now verifying the transaction confirmation email...")
+    finally:
+        release_operation()
 
 def cancel_task(res_num):
-    try:
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"⏳ Attempting to cancel reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a>...")
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    if not acquire_operation(f"Cancelling booking {res_num}"):
+        send_telegram_message(token, chat_id, f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>). Please wait for it to complete.")
+        return
         
-        # Run subprocess
-        res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true"], capture_output=True, text=True)
+    try:
+        send_telegram_message(token, chat_id, f"⏳ Attempting to cancel reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a>...")
+        
+        # Run subprocess with timeout of 90s
+        res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true"], capture_output=True, text=True, timeout=90)
         if res.returncode != 0:
-            reply = f"❌ <b>Cancellation failed:</b>\n<pre>{res.stdout[-400:] or res.stderr[-400:]}</pre>"
-            send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply)
+            global LAST_ERROR
+            LAST_ERROR = f"Cancel command failed with code {res.returncode}.\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+            reply = f"❌ <b>Cancellation failed:</b>\n<pre>{escape_html(res.stdout[-400:] or res.stderr[-400:])}</pre>\nUse 'Check Errors' button for details."
+            send_telegram_message(token, chat_id, reply)
+    except subprocess.TimeoutExpired:
+        LAST_ERROR = f"Cancellation of {res_num} timed out (90 seconds limit)."
+        send_telegram_message(token, chat_id, f"❌ <b>Cancellation operation timed out (90s limit).</b>")
     except Exception as e:
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"❌ Error: {e}")
+        LAST_ERROR = f"Exception in cancel task: {str(e)}"
+        send_telegram_message(token, chat_id, f"❌ Error: {e}")
+    finally:
+        release_operation()
 
 def handle_command(command_text):
     args = command_text.split()
@@ -642,13 +742,17 @@ def handle_command(command_text):
         res_num = args[1]
         threading.Thread(target=cancel_task, args=(res_num,), daemon=True).start()
         
+    elif cmd == "/errors":
+        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"📋 <b>Last Execution Log/Error:</b>\n\n<pre>{escape_html(LAST_ERROR)}</pre>")
+        
     elif cmd in ["/help", "/start"]:
         reply = (
             "🤖 <b>AnivaWay Bot Main Menu:</b>\n\n"
             "Use the buttons below to interact with the bot with minimal typing:\n"
             "📋 <b>List Bookings</b> - Shows your active daily permits and lets you cancel them.\n"
-            "🌲 <b>Book Daily Permit</b> - Interactive booking wizard for your favorite kiting spots.\n"
+            "🌲 <b>Book Daily Permit</b> - Interactive booking wizard with search & cancel support.\n"
             "❌ <b>Cancel Booking</b> - Display your bookings to cancel them.\n"
+            "❓ <b>Check Errors</b> - Troubleshooting log of the last failed booking or action.\n"
             "🔍 <b>Help</b> - Show this help menu."
         )
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply, MAIN_REPLY_KEYBOARD)
@@ -863,6 +967,8 @@ def main():
                                     handle_command("/book")
                                 elif text == "❌ Cancel Booking":
                                     handle_command("/cancel_list")
+                                elif text == "❓ Check Errors":
+                                    handle_command("/errors")
                                 elif text in ["🔍 Help", "🔍 Help Menu"]:
                                     handle_command("/help")
                                 elif text.startswith("/"):

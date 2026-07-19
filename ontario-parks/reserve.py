@@ -646,6 +646,8 @@ def handle_step_feedback(step_name, description, screenshot_name, page, request_
     except Exception as e:
         print("Warning: Failed to capture step screenshot:", e)
         
+    print(f"[PROGRESS] Step: {step_name} | Desc: {description} | Image: {screenshot_name}", flush=True)
+
     if progress_callback:
         try:
             progress_callback(step_name, description, screenshot_path)
