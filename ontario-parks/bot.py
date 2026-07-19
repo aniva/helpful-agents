@@ -1000,8 +1000,8 @@ def main():
                 for update in result:
                     offset = update["update_id"] + 1
                     
-                    # Handle normal commands and reply keyboard buttons
-                    message = update.get("message")
+                    # Handle normal commands, reply keyboard buttons, and edited messages
+                    message = update.get("message") or update.get("edited_message")
                     if message and str(message["chat"]["id"]) == CHAT_ID:
                         text = message.get("text", "").strip()
                         if text:
