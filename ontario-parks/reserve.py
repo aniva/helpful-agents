@@ -554,15 +554,28 @@ def fetch_park_alerts(park_name):
                         
                         if parsed_normalized == normalized_target:
                             alert_type = parts[1].strip() if len(parts) > 1 else "Notice"
-                            # Find the next sibling paragraph for description
+                            
+                            # Find description from the next sibling (could be p, div, etc.)
                             desc = ""
                             next_sib = p.find_next_sibling()
-                            if next_sib and next_sib.name == "p":
+                            if next_sib:
                                 desc = next_sib.get_text().strip()
+                            
+                            # Clean up description whitespaces and newlines
+                            desc = " ".join(desc.split())
+                            
+                            # Skip alerts with empty or placeholder descriptions
+                            if not desc or desc.lower().strip() in ["custom text", "custom text:"]:
+                                continue
+                                
+                            # Clean up generic internal types (e.g. "Park Notice - Custom Text" -> "Notice")
+                            clean_type = alert_type.replace(" - Custom Text", "").replace("Custom Text", "").strip()
+                            if not clean_type or clean_type.lower() in ["custom text", "customtext"]:
+                                clean_type = "Notice"
                             
                             alerts.append({
                                 "title": text,
-                                "type": alert_type,
+                                "type": clean_type,
                                 "description": desc
                             })
     except Exception as e:
