@@ -385,97 +385,97 @@ def check_recent_email_after_transaction(config, transaction_type, transaction_t
             if status == "OK" and messages[0]:
                 mail_ids = messages[0].split()
                 if mail_ids:
-                    latest_id = mail_ids[-1]
-                    status, data = mail.fetch(latest_id, "(RFC822)")
-                    if status == "OK":
-                        raw_email = data[0][1]
-                        msg = email.message_from_bytes(raw_email)
-                        
-                        subject_header = msg["Subject"] or ""
-                        subject, encoding = decode_header(subject_header)[0]
-                        if isinstance(subject, bytes):
-                            subject = subject.decode(encoding or "utf-8", errors="ignore")
+                    for m_id in reversed(mail_ids[-5:]):
+                        status, data = mail.fetch(m_id, "(RFC822)")
+                        if status == "OK":
+                            raw_email = data[0][1]
+                            msg = email.message_from_bytes(raw_email)
                             
-                        sender = msg["From"] or ""
-                        date_header = msg["Date"] or ""
-                        
-                        try:
-                            email_dt = email.utils.parsedate_to_datetime(date_header)
-                        except Exception:
-                            email_dt = datetime.datetime.now(datetime.timezone.utc)
-                        
-                        # Ensure email_dt is in UTC
-                        if email_dt.tzinfo is None:
-                            email_dt = email_dt.replace(tzinfo=datetime.timezone.utc)
-                        else:
-                            email_dt = email_dt.astimezone(datetime.timezone.utc)
-                            
-                        # Check if this email is indeed from after our transaction (allowing 60s clock skew)
-                        if email_dt >= transaction_time - datetime.timedelta(seconds=60):
-                            # Extract summary
-                            body = ""
-                            if msg.is_multipart():
-                                for part in msg.walk():
-                                    content_type = part.get_content_type()
-                                    content_disposition = str(part.get("Content-Disposition"))
-                                    if content_type == "text/plain" and "attachment" not in content_disposition:
-                                        body = part.get_payload(decode=True).decode(errors="ignore")
-                                        break
-                            else:
-                                body = msg.get_payload(decode=True).decode(errors="ignore")
+                            subject_header = msg["Subject"] or ""
+                            subject, encoding = decode_header(subject_header)[0]
+                            if isinstance(subject, bytes):
+                                subject = subject.decode(encoding or "utf-8", errors="ignore")
                                 
-                            soup = BeautifulSoup(body, "html.parser")
-                            text_content = soup.get_text()
+                            sender = msg["From"] or ""
+                            date_header = msg["Date"] or ""
                             
-                            # Cleanup text content for summary
-                            lines = [line.strip() for line in text_content.split("\n") if line.strip()]
-                            summary_lines = []
-                            for line in lines:
-                                if any(k in line.lower() for k in ["confirmation", "cancel", "permit", "vehicle", "plate", "amount", "total", "park", "status"]):
-                                    if len(line) < 100 and line not in summary_lines:
-                                        summary_lines.append(line)
-                            
-                            summary = ", ".join(summary_lines[:4])
-                            if not summary:
-                                summary = f"Subject: {subject}"
-                                
-                            # Determine conclusion
-                            conclusion = "all good"
-                            lower_subject = subject.lower()
-                            lower_body = text_content.lower()
-                            
-                            is_cancel_subject = "cancel" in lower_subject or "cancellation" in lower_subject
-                            is_cancel_body = "reservation has been cancelled" in lower_body or "cancellation confirmation" in lower_body
-                            
-                            if transaction_type == "book":
-                                if is_cancel_subject or is_cancel_body:
-                                    conclusion = "some issues to check (booking resulted in cancellation email?)"
-                                elif "warning" in lower_body or "action required" in lower_body or "error" in lower_body:
-                                    conclusion = "some issues to check (warnings found in email)"
-                            elif transaction_type == "cancel":
-                                if not (is_cancel_subject or is_cancel_body):
-                                    conclusion = "some issues to check (email does not confirm cancellation)"
-                                    
                             try:
-                                mail.close()
-                                mail.logout()
+                                email_dt = email.utils.parsedate_to_datetime(date_header)
                             except Exception:
-                                pass
-                            
-                            local_dt = email_dt.astimezone()
-                            time_str = local_dt.strftime("%I:%M:%S %p")
-                            
-                            return {
-                                "status": "found",
-                                "subject": subject,
-                                "sender": sender,
-                                "time": time_str,
-                                "summary": summary,
-                                "conclusion": conclusion
-                            }
+                                email_dt = datetime.datetime.now(datetime.timezone.utc)
+                                
+                            if email_dt.tzinfo is None:
+                                email_dt = email_dt.replace(tzinfo=datetime.timezone.utc)
+                            else:
+                                email_dt = email_dt.astimezone(datetime.timezone.utc)
+                                
+                            # Check date (allowing 60s clock skew)
+                            if email_dt >= transaction_time - datetime.timedelta(seconds=60):
+                                body = ""
+                                if msg.is_multipart():
+                                    for part in msg.walk():
+                                        content_type = part.get_content_type()
+                                        if content_type == "text/html":
+                                            body = part.get_payload(decode=True).decode(errors="ignore")
+                                            break
+                                        elif content_type == "text/plain" and not body:
+                                            body = part.get_payload(decode=True).decode(errors="ignore")
+                                else:
+                                    body = msg.get_payload(decode=True).decode(errors="ignore")
+                                    
+                                soup = BeautifulSoup(body, "html.parser")
+                                text_content = soup.get_text()
+                                
+                                lower_subject = subject.lower()
+                                lower_body = text_content.lower()
+                                
+                                is_cancel_subject = "cancel" in lower_subject or "cancellation" in lower_subject
+                                is_cancel_body = "reservation has been cancelled" in lower_body or "cancellation confirmation" in lower_body
+                                is_cancel = is_cancel_subject or is_cancel_body
+                                
+                                # Correlate type (skip confirmation emails when expecting cancellations, and vice-versa)
+                                if transaction_type == "cancel" and not is_cancel:
+                                    continue
+                                if transaction_type == "book" and is_cancel:
+                                    continue
+                                    
+                                # Extract summary
+                                lines = [line.strip() for line in text_content.split("\n") if line.strip()]
+                                summary_lines = []
+                                for line in lines:
+                                    if any(k in line.lower() for k in ["confirmation", "cancel", "permit", "vehicle", "plate", "amount", "total", "park", "status"]):
+                                        if len(line) < 100 and line not in summary_lines:
+                                            summary_lines.append(line)
+                                            
+                                summary = ", ".join(summary_lines[:4])
+                                if not summary:
+                                    summary = f"Subject: {subject}"
+                                    
+                                conclusion = "all good"
+                                if transaction_type == "book":
+                                    if "warning" in lower_body or "action required" in lower_body or "error" in lower_body:
+                                        conclusion = "some issues to check (warnings found in email)"
+                                        
+                                try:
+                                    mail.close()
+                                    mail.logout()
+                                except Exception:
+                                    pass
+                                    
+                                local_dt = email_dt.astimezone()
+                                time_str = local_dt.strftime("%I:%M:%S %p")
+                                
+                                return {
+                                    "status": "found",
+                                    "subject": subject,
+                                    "sender": sender,
+                                    "time": time_str,
+                                    "summary": summary,
+                                    "conclusion": conclusion
+                                }
         except Exception as e:
             print(f"IMAP poll error: {e}")
-            mail = None # Force reconnect
+            mail = None
             
         time.sleep(5)
         
@@ -488,8 +488,8 @@ def check_recent_email_after_transaction(config, transaction_type, transaction_t
             
     return {
         "status": "not_found",
-        "message": "⚠️ Checked for email from Ontario Parks, but no new emails received within 60 seconds.",
-        "conclusion": "some issues to check (no email received)"
+        "message": f"⏳ No {transaction_type} email received yet. We will monitor your inbox in the background and notify you once it arrives.",
+        "conclusion": "No email received yet. Monitoring in background..."
     }
 
 def dismiss_cookie_consent(page):
@@ -921,7 +921,7 @@ def list_reservations(email_user, password, headless=True):
         browser.close()
         return reservations
 
-def cancel_reservation(email_user, password, target_res_num, headless=True):
+def cancel_reservation(email_user, password, target_res_num, headless=True, skip_email_check=False):
     transaction_time = datetime.datetime.now(datetime.timezone.utc)
     print(f"Launching browser to cancel reservation {target_res_num}...")
     with sync_playwright() as p:
@@ -996,32 +996,33 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
                         cancel_msg = f"❌ <b>Reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{target_res_num}</a> has been successfully cancelled!</b>"
                         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], cancel_msg)
                         
-                        # Poll and post cancellation email verification
-                        result = check_recent_email_after_transaction(config, "cancel", transaction_time)
-                        if result["status"] == "found":
-                            safe_sender = escape_html(result['sender'])
-                            safe_subject = escape_html(result['subject'])
-                            safe_summary = escape_html(result['summary'])
-                            verify_msg = (
-                                f"✉️ <b>Ontario Parks Email Verification:</b>\n"
-                                f"📥 Checked for email from Ontario Parks.\n\n"
-                                f"📧 <b>Sender:</b> {safe_sender}\n"
-                                f"📅 <b>Time:</b> {result['time']}\n"
-                                f"📝 <b>Subject:</b> {safe_subject}\n"
-                                f"🔍 <b>Summary:</b> {safe_summary}\n\n"
-                                f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
-                            )
-                        elif result["status"] == "not_found":
-                            verify_msg = (
-                                f"✉️ <b>Ontario Parks Email Verification:</b>\n"
-                                f"📥 Checked for email from Ontario Parks.\n\n"
-                                f"{result['message']}\n\n"
-                                f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
-                            )
-                        else:
-                            verify_msg = result["message"]
-                            
-                        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], verify_msg)
+                        if not skip_email_check:
+                            # Poll and post cancellation email verification
+                            result = check_recent_email_after_transaction(config, "cancel", transaction_time)
+                            if result["status"] == "found":
+                                safe_sender = escape_html(result['sender'])
+                                safe_subject = escape_html(result['subject'])
+                                safe_summary = escape_html(result['summary'])
+                                verify_msg = (
+                                    f"✉️ <b>Ontario Parks Email Verification:</b>\n"
+                                    f"📥 Checked for email from Ontario Parks.\n\n"
+                                    f"📧 <b>Sender:</b> {safe_sender}\n"
+                                    f"📅 <b>Time:</b> {result['time']}\n"
+                                    f"📝 <b>Subject:</b> {safe_subject}\n"
+                                    f"🔍 <b>Summary:</b> {safe_summary}\n\n"
+                                    f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
+                                )
+                            elif result["status"] == "not_found":
+                                verify_msg = (
+                                    f"✉️ <b>Ontario Parks Email Verification:</b>\n"
+                                    f"📥 Checked for email from Ontario Parks.\n\n"
+                                    f"{result['message']}\n\n"
+                                    f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
+                                )
+                            else:
+                                verify_msg = result["message"]
+                                
+                            send_telegram_message(config["telegram_token"], config["telegram_chat_id"], verify_msg)
                     
                     return True
                 else:
@@ -1034,7 +1035,7 @@ def cancel_reservation(email_user, password, target_res_num, headless=True):
         browser.close()
         return False
 
-def run_booking_flow(config, target_park_override=None, target_date_override=None, is_headless=True, request_approval_callback=None, progress_callback=None, forecast_only=False):
+def run_booking_flow(config, target_park_override=None, target_date_override=None, is_headless=True, request_approval_callback=None, progress_callback=None, forecast_only=False, skip_email_check=False):
     transaction_time = datetime.datetime.now(datetime.timezone.utc)
     config["final_amount"] = "Unknown"
     # Ask about date if not overridden
@@ -1376,32 +1377,33 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         else:
             print("Failed to send Telegram notification.")
             
-        # Poll for new transaction email and post verification status
-        result = check_recent_email_after_transaction(config, "book", transaction_time)
-        if result["status"] == "found":
-            safe_sender = escape_html(result['sender'])
-            safe_subject = escape_html(result['subject'])
-            safe_summary = escape_html(result['summary'])
-            verify_msg = (
-                f"✉️ <b>Ontario Parks Email Verification:</b>\n"
-                f"📥 Checked for email from Ontario Parks.\n\n"
-                f"📧 <b>Sender:</b> {safe_sender}\n"
-                f"📅 <b>Time:</b> {result['time']}\n"
-                f"📝 <b>Subject:</b> {safe_subject}\n"
-                f"🔍 <b>Summary:</b> {safe_summary}\n\n"
-                f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
-            )
-        elif result["status"] == "not_found":
-            verify_msg = (
-                f"✉️ <b>Ontario Parks Email Verification:</b>\n"
-                f"📥 Checked for email from Ontario Parks.\n\n"
-                f"{result['message']}\n\n"
-                f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
-            )
-        else:
-            verify_msg = result["message"]
-            
-        send_telegram_message(config["telegram_token"], config["telegram_chat_id"], verify_msg)
+        if not skip_email_check:
+            # Poll for new transaction email and post verification status
+            result = check_recent_email_after_transaction(config, "book", transaction_time)
+            if result["status"] == "found":
+                safe_sender = escape_html(result['sender'])
+                safe_subject = escape_html(result['subject'])
+                safe_summary = escape_html(result['summary'])
+                verify_msg = (
+                    f"✉️ <b>Ontario Parks Email Verification:</b>\n"
+                    f"📥 Checked for email from Ontario Parks.\n\n"
+                    f"📧 <b>Sender:</b> {safe_sender}\n"
+                    f"📅 <b>Time:</b> {result['time']}\n"
+                    f"📝 <b>Subject:</b> {safe_subject}\n"
+                    f"🔍 <b>Summary:</b> {safe_summary}\n\n"
+                    f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
+                )
+            elif result["status"] == "not_found":
+                verify_msg = (
+                    f"✉️ <b>Ontario Parks Email Verification:</b>\n"
+                    f"📥 Checked for email from Ontario Parks.\n\n"
+                    f"{result['message']}\n\n"
+                    f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
+                )
+            else:
+                verify_msg = result["message"]
+                
+            send_telegram_message(config["telegram_token"], config["telegram_chat_id"], verify_msg)
     else:
         print("\nTelegram chat ID not configured, skipped notification.")
         print("Formatted message:")
@@ -1416,10 +1418,12 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
     
     # Subcommands
+    # Subcommands
     book_parser = subparsers.add_parser("book", help="Book a daily vehicle permit")
     book_parser.add_argument("--park", help="Name of the park (e.g. 'Sibbald Point')")
     book_parser.add_argument("--date", help="Date: 'today', 'tomorrow', 'day_after', or YYYY-MM-DD")
     book_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true", help="Run headlessly")
+    book_parser.add_argument("--skip-email-check", action="store_true", help="Skip email verification check")
     
     list_parser = subparsers.add_parser("list", help="List active reservations")
     list_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
@@ -1427,6 +1431,7 @@ def main():
     cancel_parser = subparsers.add_parser("cancel", help="Cancel a reservation")
     cancel_parser.add_argument("--reservation", required=True, help="Reservation Receipt Number to cancel")
     cancel_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
+    cancel_parser.add_argument("--skip-email-check", action="store_true", help="Skip email verification check")
     
     parser.add_argument("--forecast-only", action="store_true", help="Only show weather/wind forecast for today, tomorrow, and day after")
     parser.add_argument("--setup-telegram", action="store_true", help="Interact and resolve Telegram Chat ID dynamically")
@@ -1462,7 +1467,7 @@ def main():
             print("Error: 'ontario_parks_password' is not configured!")
             sys.exit(1)
         headless = args.headless == "true"
-        success = cancel_reservation(config["email"], password, args.reservation, headless=headless)
+        success = cancel_reservation(config["email"], password, args.reservation, headless=headless, skip_email_check=args.skip_email_check)
         if success:
             sys.exit(0)
         else:
@@ -1471,18 +1476,21 @@ def main():
     is_headless = True
     target_park_override = None
     target_date_override = None
+    skip_email_check = False
     
     if args.command == "book":
         is_headless = args.headless == "true"
         target_park_override = args.park
         target_date_override = args.date
+        skip_email_check = args.skip_email_check
         
     success = run_booking_flow(
         config,
         target_park_override=target_park_override,
         target_date_override=target_date_override,
         is_headless=is_headless,
-        forecast_only=args.forecast_only
+        forecast_only=args.forecast_only,
+        skip_email_check=skip_email_check
     )
     if success:
         sys.exit(0)

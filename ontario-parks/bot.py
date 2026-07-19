@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 
 # Add current dir to path to import reserve
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from reserve import load_config, send_telegram_message, run_booking_flow, escape_html
+from reserve import load_config, send_telegram_message, run_booking_flow, escape_html, check_recent_email_after_transaction
 import re
 
 def is_future_or_today(date_str):
@@ -59,6 +59,39 @@ def release_operation():
     global CURRENT_OPERATION
     with op_lock:
         CURRENT_OPERATION = None
+
+def background_email_monitor(transaction_type, transaction_time):
+    # Wait 60 seconds first to let things settle and avoid redundant initial checks
+    time.sleep(60)
+    
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    
+    print(f"Starting background email monitor for {transaction_type} at {transaction_time}...")
+    for attempt in range(5):
+        result = check_recent_email_after_transaction(config, transaction_type, transaction_time)
+        if result["status"] == "found":
+            safe_sender = escape_html(result['sender'])
+            safe_subject = escape_html(result['subject'])
+            safe_summary = escape_html(result['summary'])
+            verify_msg = (
+                f"✉️ <b>Ontario Parks Email Verification:</b>\n"
+                f"📥 Checked for email from Ontario Parks.\n\n"
+                f"📧 <b>Sender:</b> {safe_sender}\n"
+                f"📅 <b>Time:</b> {result['time']}\n"
+                f"📝 <b>Subject:</b> {safe_subject}\n"
+                f"🔍 <b>Summary:</b> {safe_summary}\n\n"
+                f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
+            )
+            send_telegram_message(token, chat_id, verify_msg)
+            return
+        time.sleep(60)
+        
+    # If still not found after 5 minutes
+    send_telegram_message(
+        token, chat_id,
+        f"⚠️ <b>Email Verification Timeout:</b> No {transaction_type} confirmation email found in your inbox after 10 minutes."
+    )
 
 def run_subprocess_with_progress(args, op_name, timeout_secs):
     global LAST_ERROR
@@ -683,12 +716,14 @@ def book_task(park, date):
         send_telegram_message(token, chat_id, f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>). Please wait for it to complete.")
         return
         
+    transaction_time = datetime.datetime.now(datetime.timezone.utc)
     try:
         # Use our Popen runner that parses [PROGRESS] and enforces a 360-second watchdog timeout
-        args = [sys.executable, "reserve.py", "book", "--park", park, "--date", date, "--headless", "true"]
+        args = [sys.executable, "reserve.py", "book", "--park", park, "--date", date, "--headless", "true", "--skip-email-check"]
         success = run_subprocess_with_progress(args, f"Booking {park}", 360)
         if success:
             send_telegram_message(token, chat_id, f"✅ <b>Booking successfully processed for {park} ({date})!</b>\nWe are now verifying the transaction confirmation email...")
+            threading.Thread(target=background_email_monitor, args=("book", transaction_time), daemon=True).start()
     finally:
         release_operation()
 
@@ -699,12 +734,15 @@ def cancel_task(res_num):
         send_telegram_message(token, chat_id, f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>). Please wait for it to complete.")
         return
         
+    transaction_time = datetime.datetime.now(datetime.timezone.utc)
     try:
         send_telegram_message(token, chat_id, f"⏳ Attempting to cancel reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{res_num}</a>...")
         
         # Run subprocess with timeout of 90s
-        res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true"], capture_output=True, text=True, timeout=90)
-        if res.returncode != 0:
+        res = subprocess.run([sys.executable, "reserve.py", "cancel", "--reservation", res_num, "--headless", "true", "--skip-email-check"], capture_output=True, text=True, timeout=90)
+        if res.returncode == 0:
+            threading.Thread(target=background_email_monitor, args=("cancel", transaction_time), daemon=True).start()
+        else:
             global LAST_ERROR
             LAST_ERROR = f"Cancel command failed with code {res.returncode}.\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
             reply = f"❌ <b>Cancellation failed:</b>\n<pre>{escape_html(res.stdout[-400:] or res.stderr[-400:])}</pre>\nUse 'Check Errors' button for details."
