@@ -1,59 +1,106 @@
-# Ontario Park Daily Vehicle Permit Automation
+# Ontario Parks Booking Bot & Automation
 
-A headed Playwright automation tool to search, rank, and book daily vehicle permits (DVP) at Ontario Provincial Parks based on local wind and weather forecasts (tailored for kiteboarding/windsurfing).
+A Python tool and Telegram Bot to automate searches, wind-ranking, booking, and online check-in/preregistration of Daily Vehicle Permits (DVP) at Ontario Provincial Parks (tailored for kiteboarding and windsurfing).
+
+---
 
 ## Features
 
-- **Wind Forecast Ranking**: Fetches forecast data from Open-Meteo API for participating parks and sorts them by maximum wind speed on your selected date.
-- **WAF Bypass (Headed Browser)**: Runs Playwright in headed mode (`headless=False`) using your local environment to bypass Azure Front Door WAF blocks.
-- **Autofill details**: Fills out your vehicle plate, province, seasonal permit number, and contact phone automatically on the booking details page.
-- **Gmail IMAP Check**: Checks your inbox for the confirmation email from Ontario Parks.
-- **Telegram Notification**: Sends a summary of the booking (including confirmation number, park, vehicle, and forecast) directly to your Telegram bot.
+- **Wind Forecast Ranking**: Fetches forecast data from the Open-Meteo API for participating parks and sorts them by maximum daytime wind speed.
+- **WAF Bypass & Headless Automation**: Automates the full booking checkout wizard using Playwright, handling dynamic login prompts, policies page acknowledgements, and vehicle plate entry.
+- **Online Check-In & Preregistration**: Automatically completes the online check-in or vehicle plate preregistration steps immediately after a successful checkout.
+- **Gmail IMAP Email Verification**: Polls your Gmail inbox in the background to verify transaction emails (confirmations and cancellations) received from Ontario Parks.
+- **Telegram Bot Daemon**: Includes a background Telegram daemon allowing you to monitor active permits, trigger bookings, verify status, and check execution logs interactively.
+- **Weekly Self-Test**: Automatically performs a full end-to-end booking and cancellation cycle every Monday at 7:00 AM to verify system integrity.
 
 ---
 
-## Setup Instructions
+## Setup & Installation
 
-### 1. Prerequisite Packages
-Make sure you have [uv](https://github.com/astral-sh/uv) installed on your system. 
+### 1. Prerequisites
+Make sure you have [uv](https://github.com/astral-sh/uv) or `python3-venv` installed on your Linux system.
 
-Run the following command to download and install Playwright's browser engines:
+### 2. Install Dependencies
+Create a virtual environment and install python dependencies:
 ```bash
-uv run playwright install chromium
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
 ```
 
-### 2. Configuration Settings
-All user settings are saved locally in `ontario_parks_config.json` (which is excluded from Git tracking for privacy). The file must contain:
-- **Email**: Your email address
-- **Plate**: Your vehicle license plate
-- **Permit Number**: Your seasonal park permit serial number
-- **Telegram Token**: Your Telegram Bot API token
+### 3. Install Playwright Browsers & Linux Dependencies
+Install the Chromium browser engine along with all required Linux system dependencies (essential for running headlessly on headless servers):
+```bash
+uv run playwright install chromium
+uv run playwright install-deps
+```
 
-### 3. Retrieve Telegram Chat ID
-To send you messages, the bot needs to know your chat ID. The script contains a helper to resolve it automatically:
-1. Open your Telegram app.
-2. Find the bot using your token or lookup username.
-3. Send a message to your bot (e.g. `/start` or `hi`).
-4. Run the helper command:
+### 4. Configuration
+Create a configuration file named `ontario_parks_config.json` in the root of the project. It should contain the following fields:
+
+```json
+{
+  "email": "your-email@gmail.com",
+  "ontario_parks_password": "your-ontario-parks-password",
+  "gmail_app_password": "your-gmail-app-password",
+  "vehicle_plate": "ATXJ307",
+  "vehicle_province": "ONTARIO",
+  "permit_number": "S-1234567",
+  "telegram_token": "your-telegram-bot-api-token"
+}
+```
+
+> [!NOTE]
+> * `gmail_app_password` must be a 16-character Gmail App Password generated in your Google Account security settings, and IMAP access must be enabled in your Gmail settings.
+> * `ontario_parks_config.json` is excluded from git tracking to prevent accidental credential leakage.
+
+### 5. Setup Telegram Chat ID
+To resolve and configure your Telegram Chat ID automatically:
+1. Open your Telegram app and send a message to your bot (e.g., `/start`).
+2. Run the helper setup command:
    ```bash
    uv run python reserve.py --setup-telegram
    ```
-5. The helper will poll your bot, capture your Chat ID, update `ontario_parks_config.json`, and send a success confirmation message.
+3. The helper will poll your bot, capture the active Chat ID, write it to `ontario_parks_config.json` under `telegram_chat_id`, and send a verification test message.
 
 ---
 
-## How to Run
+## Deploying as a Daemon (systemd)
 
-Simply run:
-```bash
-uv run python reserve.py
-```
+To keep the Telegram bot polling listener running persistently in the background on the `lanner-box`:
 
-### Execution Flow:
-1. **Choose Reservation Date**: Select between **Today**, **Tomorrow**, or **Day after tomorrow**.
-2. **Review Wind & Weather Rankings**: The script displays kiting parks ranked by maximum daylight wind speed. Select the number of the park you wish to reserve.
-3. **Automated Search Navigation**: Playwright opens and performs the search, clicks on the date cell in the grid, and navigates to the booking details page.
-4. **Log In (Manual Check)**: If not logged in, the browser will wait. Log in in the browser window, then press `Enter` in the console.
-5. **Autofill & Submit**: The script automatically checks "Seasonal Vehicle Permit Holder", fills in your pass number `S-2632347`, vehicle plate `ATXJ307`, province `ONTARIO`, and clicks confirm.
-6. **Checkout**: Review the final booking details ($0.00 charge), click checkout/confirm in the browser, and press `Enter` in the console once completed.
-7. **Confirmation & Notifications**: The script extracts your confirmation number, takes a screenshot of the confirmation page, verifies the email receipt in Gmail, and sends a notification to Telegram!
+1. Copy the systemd user service file to your systemd user configuration directory:
+   ```bash
+   mkdir -p ~/.config/systemd/user/
+   cp ontario_parks_bot.service ~/.config/systemd/user/
+   ```
+
+2. Reload systemd daemon config and enable/start the service:
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable ontario_parks_bot.service
+   systemctl --user start ontario_parks_bot.service
+   ```
+
+3. Enable **linger** for your user account so systemd user services continue running after you log out of your SSH session:
+   ```bash
+   loginctl enable-linger $USER
+   ```
+
+### Managing the Service:
+* **Check Status**: `systemctl --user status ontario_parks_bot`
+* **Restart Bot**: `systemctl --user restart ontario_parks_bot`
+* **Stop Bot**: `systemctl --user stop ontario_parks_bot`
+* **View Live Logs**: `journalctl --user -u ontario_parks_bot.service -f`
+
+---
+
+## Bot Interaction Commands
+
+You can interact with the bot in Telegram using both the quick reply buttons or direct command inputs:
+
+* `📋 List Bookings` / `/list`: Lists your currently active Ontario Parks permits.
+* `🌲 Book Daily Permit` / `/book`: Opens the inline booking wizard to select a park and date.
+* `❌ Cancel Booking` / `/cancel_list`: Lists your active permits with individual buttons to cancel them.
+* `❓ Check Errors` / `/errors`: Sends the standard error trace of the last failed execution.
+* `/selftest`: Manually triggers a weekly self-test run (books a random park for Wednesday, verifies emails, and cancels the booking).
