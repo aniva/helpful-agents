@@ -757,11 +757,20 @@ def cancel_task(res_num):
         release_operation()
 
 def handle_command(command_text):
+    global CURRENT_OPERATION
     args = command_text.split()
     if not args:
         return
         
     cmd = args[0].lower().split("@")[0] # Strip bot username if present (e.g. /list@AnivaWayBot)
+    
+    # Check concurrent operations lock
+    if cmd in ["/list", "/cancel_list", "/book", "/cancel"]:
+        if CURRENT_OPERATION is not None:
+            token = config["telegram_token"]
+            chat_id = config["telegram_chat_id"]
+            send_telegram_message(token, chat_id, f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>). Please wait for it to complete.")
+            return
     
     if cmd == "/list":
         threading.Thread(target=list_task, args=(False,), daemon=True).start()
@@ -796,12 +805,18 @@ def handle_command(command_text):
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply, MAIN_REPLY_KEYBOARD)
 
 def handle_callback(callback_query):
+    global CURRENT_OPERATION
     token = config["telegram_token"]
     chat_id = config["telegram_chat_id"]
     query_id = callback_query["id"]
     message_id = callback_query["message"]["message_id"]
     data = callback_query["data"]
     
+    if CURRENT_OPERATION is not None and data not in ["cancel_wizard", "keep_booking", "cal_ignore"]:
+        answer_callback_query(token, query_id)
+        send_telegram_message(token, chat_id, f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>). Please wait for it to complete.")
+        return
+        
     answer_callback_query(token, query_id)
     
     if data == "cal_ignore":
@@ -991,6 +1006,13 @@ def main():
                         text = message.get("text", "").strip()
                         if text:
                             global USER_STATE
+                            # Clear search state if user typed a menu command or slash command
+                            is_menu_command = text.startswith("/") or text in [
+                                "📋 List Bookings", "🌲 Book Daily Permit", "❌ Cancel Booking", "❓ Check Errors", "🔍 Help", "🔍 Help Menu"
+                            ]
+                            if is_menu_command:
+                                USER_STATE = None
+                                
                             if USER_STATE == "awaiting_park_search":
                                 if text.lower() == "cancel":
                                     USER_STATE = None
