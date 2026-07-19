@@ -18,6 +18,30 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from reserve import load_config, send_telegram_message, run_booking_flow, escape_html
 import re
 
+def is_future_or_today(date_str):
+    if not date_str:
+        return False
+    try:
+        # date_str is e.g. "Sun Jul 19"
+        parts = date_str.split()
+        if len(parts) >= 3:
+            month_name = parts[1] # e.g. "Jul"
+            day_num = int(parts[2]) # e.g. 19
+            month_num = list(calendar.month_abbr).index(month_name[:3].title())
+            current_year = datetime.date.today().year
+            email_date = datetime.date(current_year, month_num, day_num)
+            
+            today = datetime.date.today()
+            # If the email date is in Jan but today is Dec, assume it belongs to next year
+            if (today - email_date).days > 180:
+                email_date = datetime.date(current_year + 1, month_num, day_num)
+                
+            # Allow yesterday's dates as well just in case they land late or bot checks late
+            return email_date >= today - datetime.timedelta(days=1)
+    except Exception as ex:
+        print(f"Error parsing date {date_str}: {ex}")
+    return False
+
 def check_and_notify_checkin_reminders():
     email_user = config.get("email")
     app_password = config.get("gmail_app_password")
@@ -95,6 +119,12 @@ def check_and_notify_checkin_reminders():
                                         arrival_date = lines[idx+1]
                                     break
                                     
+                            # Skip if arrival_date is empty or in the past
+                            if not arrival_date or not is_future_or_today(arrival_date):
+                                print(f"Skipping outdated/invalid check-in reminder {msg_id} (Date: '{arrival_date}')")
+                                notified_ids.add(msg_id)
+                                continue
+                                
                             # Escape text values for safety
                             safe_park = escape_html(park_name)
                             safe_date = escape_html(arrival_date)
