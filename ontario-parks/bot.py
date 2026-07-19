@@ -93,7 +93,121 @@ def background_email_monitor(transaction_type, transaction_time):
         f"⚠️ <b>Email Verification Timeout:</b> No {transaction_type} confirmation email found in your inbox after 10 minutes."
     )
 
-def run_subprocess_with_progress(args, op_name, timeout_secs):
+def run_self_test_flow():
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    
+    # Try to lock the bot. If already busy, wait up to 30 minutes (checking every 5 mins)
+    acquired = False
+    for _ in range(6):
+        if acquire_operation("Weekly Self-Test"):
+            acquired = True
+            break
+        time.sleep(300)
+        
+    if not acquired:
+        send_telegram_message(token, chat_id, "⚠️ <b>Weekly Self-Test Aborted:</b> The bot was busy with another operation for over 30 minutes.")
+        return
+        
+    try:
+        import random
+        park = random.choice(["Sibbald Point", "Presqu'ile", "Wasaga Beach"])
+        
+        today = datetime.date.today()
+        # Wednesday is weekday = 2 (Monday is 0)
+        days_ahead = 2 - today.weekday()
+        if days_ahead <= 0:
+            days_ahead += 7
+        target_date = today + datetime.timedelta(days=days_ahead)
+        target_date_str = target_date.strftime("%Y-%m-%d")
+        
+        send_telegram_message(
+            token, chat_id,
+            f"🧪 <b>Weekly Self-Test Started:</b>\n"
+            f"🌲 <b>Park:</b> {park}\n"
+            f"📅 <b>Date:</b> Wednesday ({target_date_str})\n\n"
+            f"⌛ <i>Attempting automated booking...</i>"
+        )
+        
+        # Book the park
+        args = [sys.executable, "reserve.py", "book", "--park", park, "--date", target_date_str, "--headless", "true", "--skip-email-check"]
+        metadata = {}
+        booking_success = run_subprocess_with_progress(args, f"Self-Test Booking {park}", 360, out_metadata=metadata)
+        
+        conf_num = metadata.get("conf_number")
+        
+        if not booking_success or not conf_num:
+            send_telegram_message(
+                token, chat_id,
+                f"❌ <b>Weekly Self-Test Failed:</b> Booking failed or confirmation number could not be found.\n"
+                f"Use 'Check Errors' for details."
+            )
+            return
+            
+        send_telegram_message(
+            token, chat_id,
+            f"✅ <b>Weekly Self-Test - Booking Successful!</b>\n"
+            f"🔑 <b>Confirmation #:</b> {conf_num}\n\n"
+            f"⌛ <i>Attempting automated cancellation...</i>"
+        )
+        
+        # Wait 5 seconds to let system settle
+        time.sleep(5)
+        
+        # Cancel the booking
+        cancel_args = [sys.executable, "reserve.py", "cancel", "--reservation", conf_num, "--headless", "true", "--skip-email-check"]
+        res = subprocess.run(cancel_args, capture_output=True, text=True, timeout=90)
+        
+        if res.returncode == 0:
+            send_telegram_message(
+                token, chat_id,
+                f"✅ <b>Weekly Self-Test Completed Successfully!</b>\n"
+                f"❌ Reservation <b>{conf_num}</b> was successfully cancelled."
+            )
+        else:
+            global LAST_ERROR
+            LAST_ERROR = f"Self-Test Cancellation failed with code {res.returncode}.\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+            send_telegram_message(
+                token, chat_id,
+                f"⚠️ <b>Weekly Self-Test Issue:</b> Booking was successful, but automated cancellation failed.\n"
+                f"Please cancel reservation <b>{conf_num}</b> manually.\n"
+                f"Use 'Check Errors' for details."
+            )
+            
+    except Exception as e:
+        send_telegram_message(token, chat_id, f"❌ <b>Weekly Self-Test Exception:</b> {e}")
+    finally:
+        release_operation()
+
+def selftest_loop():
+    time.sleep(60) # Wait 60 seconds after bot boot
+    while True:
+        try:
+            now = datetime.datetime.now() # Local time
+            # Check if it is Monday (weekday = 0) and the hour is 7am
+            if now.weekday() == 0 and now.hour == 7:
+                last_date = ""
+                json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_selftest.json")
+                if os.path.exists(json_path):
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        try:
+                            data = json.load(f)
+                            last_date = data.get("last_run_date", "")
+                        except Exception:
+                            pass
+                
+                today_str = now.strftime("%Y-%m-%d")
+                if last_date != today_str:
+                    # Persist run date immediately to avoid duplicate runs
+                    with open(json_path, "w", encoding="utf-8") as f:
+                        json.dump({"last_run_date": today_str}, f)
+                    
+                    threading.Thread(target=run_self_test_flow, daemon=True).start()
+        except Exception as e:
+            print(f"Error in selftest_loop: {e}")
+        time.sleep(60)
+
+def run_subprocess_with_progress(args, op_name, timeout_secs, out_metadata=None):
     global LAST_ERROR
     token = config["telegram_token"]
     chat_id = config["telegram_chat_id"]
@@ -113,6 +227,11 @@ def run_subprocess_with_progress(args, op_name, timeout_secs):
         stdout_lines = []
         for line in iter(proc.stdout.readline, ""):
             stdout_lines.append(line)
+            if "Captured confirmation number:" in line:
+                conf_match = re.search(r"Captured confirmation number:\s*(\S+)", line)
+                if conf_match and out_metadata is not None:
+                    out_metadata["conf_number"] = conf_match.group(1)
+                    
             if line.startswith("[PROGRESS]"):
                 parts = line.strip().split(" | ")
                 step_name = ""
@@ -765,7 +884,7 @@ def handle_command(command_text):
     cmd = args[0].lower().split("@")[0] # Strip bot username if present (e.g. /list@AnivaWayBot)
     
     # Check concurrent operations lock
-    if cmd in ["/list", "/cancel_list", "/book", "/cancel"]:
+    if cmd in ["/list", "/cancel_list", "/book", "/cancel", "/selftest"]:
         if CURRENT_OPERATION is not None:
             token = config["telegram_token"]
             chat_id = config["telegram_chat_id"]
@@ -789,6 +908,9 @@ def handle_command(command_text):
         res_num = args[1]
         threading.Thread(target=cancel_task, args=(res_num,), daemon=True).start()
         
+    elif cmd == "/selftest":
+        threading.Thread(target=run_self_test_flow, daemon=True).start()
+        
     elif cmd == "/errors":
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], f"📋 <b>Last Execution Log/Error:</b>\n\n<pre>{escape_html(LAST_ERROR)}</pre>")
         
@@ -799,6 +921,7 @@ def handle_command(command_text):
             "📋 <b>List Bookings</b> - Shows your active daily permits and lets you cancel them.\n"
             "🌲 <b>Book Daily Permit</b> - Interactive booking wizard with search & cancel support.\n"
             "❌ <b>Cancel Booking</b> - Display your bookings to cancel them.\n"
+            "🧪 <b>Run Self-Test</b> - Manually trigger the booking and cancellation self-test (runs automatically every Monday at 7am).\n"
             "❓ <b>Check Errors</b> - Troubleshooting log of the last failed booking or action.\n"
             "🔍 <b>Help</b> - Show this help menu."
         )
@@ -954,6 +1077,7 @@ def set_bot_commands(token):
         "commands": [
             {"command": "list", "description": "📋 List active permits & cancel them"},
             {"command": "book", "description": "🌲 Book daily permit"},
+            {"command": "selftest", "description": "🧪 Run booking & cancellation self-test"},
             {"command": "help", "description": "🔍 Show main menu / help menu"}
         ]
     }
@@ -985,6 +1109,7 @@ def main():
             time.sleep(1800) # Check every 30 minutes
             
     threading.Thread(target=reminder_loop, daemon=True).start()
+    threading.Thread(target=selftest_loop, daemon=True).start()
     
     offset = None
     url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
