@@ -1160,11 +1160,23 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         
         print("Navigating to homepage...")
         page.goto("https://reservations.ontarioparks.ca/", timeout=40000)
-        page.wait_for_load_state("domcontentloaded")
+        
+        # Wait for full load and let Angular app render
+        page.wait_for_load_state("load")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+            
         dismiss_cookie_consent(page)
         
         print("Opening Day Use section...")
         day_use_tab = page.locator("#mat-tab-link-1, a:has-text('Day Use'), .mat-tab-link:has-text('Day Use')")
+        try:
+            day_use_tab.first.wait_for(state="visible", timeout=10000)
+        except Exception as e:
+            print("Warning: Day Use tab not visible yet:", e)
+            
         day_use_tab.first.click()
         time.sleep(1)
         

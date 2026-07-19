@@ -917,13 +917,16 @@ def handle_command(command_text):
     elif cmd in ["/help", "/start"]:
         reply = (
             "🤖 <b>AnivaWay Bot Main Menu:</b>\n\n"
-            "Use the buttons below to interact with the bot with minimal typing:\n"
-            "📋 <b>List Bookings</b> - Shows your active daily permits and lets you cancel them.\n"
-            "🌲 <b>Book Daily Permit</b> - Interactive booking wizard with search & cancel support.\n"
-            "❌ <b>Cancel Booking</b> - Display your bookings to cancel them.\n"
-            "🧪 <b>Run Self-Test</b> - Manually trigger the booking and cancellation self-test (runs automatically every Monday at 7am).\n"
-            "❓ <b>Check Errors</b> - Troubleshooting log of the last failed booking or action.\n"
-            "🔍 <b>Help</b> - Show this help menu."
+            "Use the reply menu buttons at the bottom to interact with minimal typing:\n"
+            "📋 <b>List Bookings</b> - List active reservations.\n"
+            "🌲 <b>Book Daily Permit</b> - Start interactive booking.\n"
+            "❌ <b>Cancel Booking</b> - Show your bookings with cancel buttons.\n"
+            "❓ <b>Check Errors</b> - View details of the last failed action.\n\n"
+            "💬 <b>Manual Text Commands:</b>\n"
+            "🧪 <code>/selftest</code> - Trigger the booking & cancellation self-test (runs automatically every Monday at 7am).\n"
+            "❌ <code>/cancel [Reservation Number]</code> - Directly cancel a specific permit.\n"
+            "📋 <code>/list</code> - List bookings.\n"
+            "🔍 <code>/help</code> - Show this menu."
         )
         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], reply, MAIN_REPLY_KEYBOARD)
 
