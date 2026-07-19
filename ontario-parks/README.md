@@ -36,8 +36,26 @@ uv run playwright install-deps
 ```
 
 ### 4. Configuration
-Create a configuration file named `ontario_parks_config.json` in the root of the project. It should contain the following fields:
+You can configure the credentials and settings using either **a configuration JSON file** or **environment variables (a `.env` file)**.
 
+#### Option A: Using `.env` (Recommended)
+Copy the `.env.template` file to `.env` in the root of the project and fill out your credentials:
+```bash
+cp .env.template .env
+```
+Fill out the variables inside:
+* `ONTARIO_PARKS_EMAIL`: Your Ontario Parks account email.
+* `ONTARIO_PARKS_PASSWORD`: Your Ontario Parks account password.
+* `ONTARIO_PARKS_PLATE`: Your vehicle license plate (e.g., `ATXJ307`).
+* `ONTARIO_PARKS_PROVINCE`: The province of the license plate (defaults to `ONTARIO`).
+* `ONTARIO_PARKS_PERMIT`: Your Seasonal Vehicle Permit serial number.
+* `ONTARIO_PARKS_PHONE`: Your phone number.
+* `GMAIL_APP_PASSWORD`: Gmail App Password (16 characters) with IMAP enabled.
+* `TELEGRAM_TOKEN`: Your Telegram Bot API token.
+* `TELEGRAM_CHAT_ID`: Your resolved Telegram Chat ID.
+
+#### Option B: Using `ontario_parks_config.json`
+Alternatively, create a configuration file named `ontario_parks_config.json` in the root of the project:
 ```json
 {
   "email": "your-email@gmail.com",
@@ -51,8 +69,8 @@ Create a configuration file named `ontario_parks_config.json` in the root of the
 ```
 
 > [!NOTE]
-> * `gmail_app_password` must be a 16-character Gmail App Password generated in your Google Account security settings, and IMAP access must be enabled in your Gmail settings.
-> * `ontario_parks_config.json` is excluded from git tracking to prevent accidental credential leakage.
+> * `gmail_app_password` / `GMAIL_APP_PASSWORD` must be a 16-character Gmail App Password generated in your Google Account security settings, and IMAP access must be enabled in your Gmail settings.
+> * Both `.env` and `ontario_parks_config.json` are excluded from git tracking to prevent accidental credential leakage.
 
 ### 5. Setup Telegram Chat ID
 To resolve and configure your Telegram Chat ID automatically:
