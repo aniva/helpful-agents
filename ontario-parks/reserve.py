@@ -439,6 +439,11 @@ def check_recent_email_after_transaction(config, transaction_type, transaction_t
                                 if transaction_type == "book" and is_cancel:
                                     continue
                                     
+                                # Skip check-in emails for transactional checks
+                                is_checkin = "check in" in lower_subject or "check-in" in lower_subject or "check in online" in lower_body
+                                if is_checkin:
+                                    continue
+                                    
                                 # Extract summary
                                 lines = [line.strip() for line in text_content.split("\n") if line.strip()]
                                 summary_lines = []
@@ -1368,22 +1373,23 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         page.screenshot(path=screenshot_path)
         print(f"Saved confirmation screenshot to {screenshot_path}")
         
-        print("Wizard Completed. Running preregistration automation...")
+        print("Wizard Completed. Running preregistration/check-in automation...")
         try:
-            preregister_btn = page.locator("button:has-text('Preregister'), a:has-text('Preregister')")
+            preregister_btn = page.locator("button:has-text('Preregister'), a:has-text('Preregister'), button:has-text('Check in'), a:has-text('Check in')")
             if preregister_btn.count() > 0 and preregister_btn.first.is_visible():
+                print("Clicking preregistration/check-in entry button...")
                 preregister_btn.first.click()
                 time.sleep(4)
                 page.wait_for_load_state("networkidle")
                 
-                preregister_now_btn = page.locator("button:has-text('Preregister now')")
-                if preregister_now_btn.count() > 0 and preregister_now_btn.first.is_visible():
-                    preregister_now_btn.first.click()
+                confirm_checkin_btn = page.locator("button:has-text('Preregister now'), button:has-text('Confirm check in'), button:has-text('Confirm check-in'), button:has-text('Check in now')")
+                if confirm_checkin_btn.count() > 0 and confirm_checkin_btn.first.is_visible():
+                    confirm_checkin_btn.first.click()
                     time.sleep(4)
                     page.wait_for_load_state("networkidle")
-                    print("Successfully Preregistered vehicle plate!")
+                    print("Successfully completed preregistration/check-in automation!")
         except Exception as e:
-            print("Warning: Preregistration failed with issue:", e)
+            print("Warning: Preregistration/check-in automation failed with issue:", e)
 
         if conf_number == "Unknown":
             print("Error: Booking process failed or confirmation number could not be found.")
