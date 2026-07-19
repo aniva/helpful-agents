@@ -42,6 +42,106 @@ def is_future_or_today(date_str):
         print(f"Error parsing date {date_str}: {ex}")
     return False
 
+USER_STATE = None
+
+def add_recent_park(park_name):
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recent_parks.json")
+    recent = []
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                recent = json.load(f)
+        except Exception:
+            pass
+    # Normalize name (remove " Provincial Park" suffix)
+    clean = park_name.replace(" Provincial Park", "").strip()
+    if clean in recent:
+        recent.remove(clean)
+    recent.insert(0, clean)
+    recent = recent[:5]
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(recent, f, indent=4)
+    except Exception:
+        pass
+
+def get_recent_parks_keyboard():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recent_parks.json")
+    recent = []
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                recent = json.load(f)
+        except Exception:
+            pass
+    if not recent:
+        recent = ["Sibbald Point", "Presqu'ile", "Wasaga Beach (Area 6)"]
+        
+    rows = []
+    row = []
+    for p in recent:
+        row.append({"text": f"🌲 {p}", "callback_data": f"park:{p}"})
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+        
+    rows.append([
+        {"text": "🔍 Search for another park", "callback_data": "search_park"}
+    ])
+    rows.append([
+        {"text": "❌ Cancel", "callback_data": "cancel_wizard"}
+    ])
+    return {"inline_keyboard": rows}
+
+def perform_park_search(query):
+    global USER_STATE
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "all_parks.json")
+    all_parks = []
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                all_parks = json.load(f)
+        except Exception:
+            pass
+            
+    matches = [p for p in all_parks if query.lower() in p.lower()]
+    
+    token = config["telegram_token"]
+    chat_id = config["telegram_chat_id"]
+    
+    if not matches:
+        send_telegram_message(
+            token, chat_id,
+            f"❌ No provincial parks matched your query: <b>{escape_html(query)}</b>\n"
+            "Please try another name (or type <code>cancel</code> to exit search):"
+        )
+        return
+        
+    USER_STATE = None
+    
+    reply_text = f"🔍 <b>Search results for '{escape_html(query)}':</b>\nSelect a park to book:"
+    rows = []
+    row = []
+    for p in matches[:10]:
+        row.append({"text": f"🌲 {p}", "callback_data": f"park:{p}"})
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+        
+    if len(matches) > 10:
+        reply_text = f"🔍 <b>Found {len(matches)} matches (showing top 10).</b>\nSelect a park to book:"
+        
+    rows.append([
+        {"text": "🔍 Search again", "callback_data": "search_park"},
+        {"text": "❌ Cancel", "callback_data": "cancel_wizard"}
+    ])
+    
+    send_telegram_keyboard(token, chat_id, reply_text, {"inline_keyboard": rows})
+
 def check_and_notify_checkin_reminders():
     email_user = config.get("email")
     app_password = config.get("gmail_app_password")
@@ -372,7 +472,8 @@ def create_calendar_keyboard(park_name, year, month):
         
     # Navigation/Back Row
     keyboard["inline_keyboard"].append([
-        {"text": "🔙 Back to Quick Dates", "callback_data": f"back_to_quick:{park_name}"}
+        {"text": "🔙 Back to Quick Dates", "callback_data": f"back_to_quick:{park_name}"},
+        {"text": "❌ Cancel", "callback_data": "cancel_wizard"}
     ])
     
     return keyboard
@@ -531,17 +632,7 @@ def handle_command(command_text):
         threading.Thread(target=list_task, args=(True,), daemon=True).start()
         
     elif cmd == "/book":
-        parks_keyboard = {
-            "inline_keyboard": [
-                [
-                    {"text": "🌲 Sibbald Point", "callback_data": "park:Sibbald Point"},
-                    {"text": "🌲 Presqu'ile", "callback_data": "park:Presqu'ile"}
-                ],
-                [
-                    {"text": "🌲 Wasaga Beach (Area 6)", "callback_data": "park:Wasaga Beach 6"}
-                ]
-            ]
-        }
+        parks_keyboard = get_recent_parks_keyboard()
         send_telegram_keyboard(config["telegram_token"], config["telegram_chat_id"], "🌲 <b>Ontario Parks Booking Wizard</b>\nSelect a park to book:", parks_keyboard)
         
     elif cmd == "/cancel":
@@ -576,11 +667,22 @@ def handle_callback(callback_query):
         
     elif data.startswith("park:"):
         park_name = data.split(":", 1)[1]
+        add_recent_park(park_name)
         keyboard = get_quick_dates_keyboard(park_name)
         edit_telegram_keyboard(
             token, chat_id, message_id, 
             f"📅 <b>Select a Date for {park_name}:</b>", 
             keyboard
+        )
+        
+    elif data == "search_park":
+        global USER_STATE
+        USER_STATE = "awaiting_park_search"
+        edit_telegram_keyboard(
+            token, chat_id, message_id,
+            "🔍 <b>Search for another park:</b>\n\n"
+            "Please reply/type the name of the park you want to find (e.g. <i>Pinery</i> or <i>Algonquin</i>).\n\n"
+            "Type <code>cancel</code> to exit search."
         )
         
     elif data.startswith("show_calendar:"):
@@ -746,21 +848,29 @@ def main():
                     if message and str(message["chat"]["id"]) == CHAT_ID:
                         text = message.get("text", "").strip()
                         if text:
-                            # Map reply keyboard labels to standard commands
-                            if text == "📋 List Bookings":
-                                handle_command("/list")
-                            elif text == "🌲 Book Daily Permit":
-                                handle_command("/book")
-                            elif text == "❌ Cancel Booking":
-                                handle_command("/cancel_list")
-                            elif text in ["🔍 Help", "🔍 Help Menu"]:
-                                handle_command("/help")
-                            elif text.startswith("/"):
-                                print(f"Received command: {text}")
-                                handle_command(text)
+                            global USER_STATE
+                            if USER_STATE == "awaiting_park_search":
+                                if text.lower() == "cancel":
+                                    USER_STATE = None
+                                    send_telegram_message(TOKEN, CHAT_ID, "❌ <i>Search cancelled.</i>", MAIN_REPLY_KEYBOARD)
+                                else:
+                                    perform_park_search(text)
                             else:
-                                print(f"Received unrecognized text: {text}, showing menu")
-                                handle_command("/help")
+                                # Map reply keyboard labels to standard commands
+                                if text == "📋 List Bookings":
+                                    handle_command("/list")
+                                elif text == "🌲 Book Daily Permit":
+                                    handle_command("/book")
+                                elif text == "❌ Cancel Booking":
+                                    handle_command("/cancel_list")
+                                elif text in ["🔍 Help", "🔍 Help Menu"]:
+                                    handle_command("/help")
+                                elif text.startswith("/"):
+                                    print(f"Received command: {text}")
+                                    handle_command(text)
+                                else:
+                                    print(f"Received unrecognized text: {text}, showing menu")
+                                    handle_command("/help")
                             
                     # Handle keyboard selections
                     callback_query = update.get("callback_query")
