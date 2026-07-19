@@ -444,14 +444,17 @@ def check_recent_email_after_transaction(config, transaction_type, transaction_t
                             lower_subject = subject.lower()
                             lower_body = text_content.lower()
                             
+                            is_cancel_subject = "cancel" in lower_subject or "cancellation" in lower_subject
+                            is_cancel_body = "reservation has been cancelled" in lower_body or "cancellation confirmation" in lower_body
+                            
                             if transaction_type == "book":
-                                if "cancel" in lower_subject or "cancel" in lower_body:
+                                if is_cancel_subject or is_cancel_body:
                                     conclusion = "some issues to check (booking resulted in cancellation email?)"
                                 elif "warning" in lower_body or "action required" in lower_body or "error" in lower_body:
                                     conclusion = "some issues to check (warnings found in email)"
                             elif transaction_type == "cancel":
-                                if "confirmation" in lower_subject and "cancel" not in lower_subject and "cancel" not in lower_body:
-                                    conclusion = "some issues to check (cancellation resulted in confirmation email?)"
+                                if not (is_cancel_subject or is_cancel_body):
+                                    conclusion = "some issues to check (email does not confirm cancellation)"
                                     
                             try:
                                 mail.close()
