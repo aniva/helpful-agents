@@ -15,168 +15,114 @@ from bs4 import BeautifulSoup
 
 # Add current dir to path to import reserve
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from reserve import load_config, send_telegram_message, run_booking_flow
+from reserve import load_config, send_telegram_message, run_booking_flow, escape_html
+import re
 
-def check_recent_email_after_transaction(config, transaction_type, transaction_time):
-    """
-    Polls IMAP for a new Ontario Parks email.
-    transaction_type: 'book' or 'cancel'
-    transaction_time: datetime.datetime (aware, in UTC)
-    """
+def check_and_notify_checkin_reminders():
     email_user = config.get("email")
     app_password = config.get("gmail_app_password")
     if not email_user or not app_password:
-        return {
-            "status": "skipped",
-            "message": "⚠️ Email verification skipped: Gmail credentials not configured."
-        }
+        return
         
-    print(f"Polling for new Ontario Parks email (type: {transaction_type})...")
-    
-    start_poll = time.time()
-    while time.time() - start_poll < 60:
+    notified_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notified_checkins.json")
+    notified_ids = set()
+    if os.path.exists(notified_file):
         try:
-            mail = imaplib.IMAP4_SSL("imap.gmail.com")
-            mail.login(email_user, app_password)
-            mail.select("inbox")
+            with open(notified_file, "r") as f:
+                notified_ids = set(json.load(f))
+        except Exception:
+            pass
             
-            search_query = 'OR (FROM "confirmations@camis.com") (SUBJECT "Ontario Parks")'
-            status, messages = mail.search(None, search_query)
-            if status != "OK":
-                status, messages = mail.search(None, '(SUBJECT "Ontario Parks")')
-                
+    print("Checking Gmail for check-in reminders...")
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com", timeout=15)
+        mail.login(email_user, app_password)
+        mail.select("inbox")
+        
+        search_query = '(FROM "confirmations@camis.com" SUBJECT "It\'s time to check in online!")'
+        status, messages = mail.search(None, search_query)
+        if status == "OK" and messages[0]:
             mail_ids = messages[0].split()
-            if mail_ids:
-                latest_id = mail_ids[-1]
-                status, data = mail.fetch(latest_id, "(RFC822)")
+            for m_id in mail_ids:
+                status, header_data = mail.fetch(m_id, "(BODY[HEADER.FIELDS (MESSAGE-ID)])")
                 if status == "OK":
-                    raw_email = data[0][1]
-                    msg = email.message_from_bytes(raw_email)
-                    
-                    subject_header = msg["Subject"] or ""
-                    subject, encoding = decode_header(subject_header)[0]
-                    if isinstance(subject, bytes):
-                        subject = subject.decode(encoding or "utf-8", errors="ignore")
-                        
-                    sender = msg["From"] or ""
-                    date_header = msg["Date"] or ""
-                    
-                    try:
-                        email_dt = email.utils.parsedate_to_datetime(date_header)
-                    except Exception:
-                        email_dt = datetime.datetime.now(datetime.timezone.utc)
-                    
-                    # Ensure email_dt is in UTC
-                    if email_dt.tzinfo is None:
-                        email_dt = email_dt.replace(tzinfo=datetime.timezone.utc)
-                    else:
-                        email_dt = email_dt.astimezone(datetime.timezone.utc)
-                        
-                    # Check if this email is indeed from after our transaction (allowing 60s clock skew)
-                    if email_dt >= transaction_time - datetime.timedelta(seconds=60):
-                        # Extract summary
-                        body = ""
-                        if msg.is_multipart():
-                            for part in msg.walk():
-                                content_type = part.get_content_type()
-                                content_disposition = str(part.get("Content-Disposition"))
-                                if content_type == "text/plain" and "attachment" not in content_disposition:
-                                    body = part.get_payload(decode=True).decode(errors="ignore")
-                                    break
-                        else:
-                            body = msg.get_payload(decode=True).decode(errors="ignore")
+                    header_text = header_data[0][1].decode(errors="ignore")
+                    msg_id_match = re.search(r"Message-ID:\s*(<[^>]+>)", header_text, re.IGNORECASE)
+                    if msg_id_match:
+                        msg_id = msg_id_match.group(1)
+                        if msg_id in notified_ids:
+                            continue
                             
-                        soup = BeautifulSoup(body, "html.parser")
-                        text_content = soup.get_text()
-                        
-                        # Cleanup text content for summary
-                        lines = [line.strip() for line in text_content.split("\n") if line.strip()]
-                        summary_lines = []
-                        # Look for lines containing keywords
-                        for line in lines:
-                            if any(k in line.lower() for k in ["confirmation", "cancel", "permit", "vehicle", "plate", "amount", "total", "park", "status"]):
-                                if len(line) < 100 and line not in summary_lines:
-                                    summary_lines.append(line)
-                        
-                        summary = ", ".join(summary_lines[:4])
-                        if not summary:
-                            summary = f"Subject: {subject}"
+                        # Fetch full message
+                        status, data = mail.fetch(m_id, "(RFC822)")
+                        if status == "OK":
+                            raw_email = data[0][1]
+                            msg = email.message_from_bytes(raw_email)
                             
-                        # Determine conclusion
-                        conclusion = "all good"
-                        lower_subject = subject.lower()
-                        lower_body = text_content.lower()
-                        
-                        if transaction_type == "book":
-                            if "cancel" in lower_subject or "cancel" in lower_body:
-                                conclusion = "some issues to check (booking resulted in cancellation email?)"
-                            elif "warning" in lower_body or "action required" in lower_body or "error" in lower_body:
-                                conclusion = "some issues to check (warnings found in email)"
-                        elif transaction_type == "cancel":
-                            if "confirmation" in lower_subject and "cancel" not in lower_subject and "cancel" not in lower_body:
-                                conclusion = "some issues to check (cancellation resulted in confirmation email?)"
+                            # Extract body
+                            body = ""
+                            if msg.is_multipart():
+                                for part in msg.walk():
+                                    content_type = part.get_content_type()
+                                    if content_type == "text/html":
+                                        body = part.get_payload(decode=True).decode(errors="ignore")
+                                        break
+                                    elif content_type == "text/plain" and not body:
+                                        body = part.get_payload(decode=True).decode(errors="ignore")
+                            else:
+                                body = msg.get_payload(decode=True).decode(errors="ignore")
                                 
-                        mail.close()
-                        mail.logout()
-                        
-                        # Local time formatting for output
-                        local_dt = email_dt.astimezone()
-                        time_str = local_dt.strftime("%I:%M:%S %p")
-                        
-                        return {
-                            "status": "found",
-                            "subject": subject,
-                            "sender": sender,
-                            "time": time_str,
-                            "summary": summary,
-                            "conclusion": conclusion
-                        }
-            mail.close()
-            mail.logout()
-        except Exception as e:
-            print(f"IMAP poll error: {e}")
-            
-        time.sleep(5)
+                            soup = BeautifulSoup(body, "html.parser")
+                            text_content = soup.get_text()
+                            
+                            # Parse checkin link
+                            checkin_url = "https://reservations.ontarioparks.ca/account/all-bookings"
+                            for a in soup.find_all("a", href=True):
+                                if "check in" in a.get_text().lower() or "checkin" in a["href"].lower():
+                                    checkin_url = a["href"]
+                                    break
+                                    
+                            # Parse park name
+                            park_match = re.search(r"arrive at\s+([^.]+?)\.", text_content, re.IGNORECASE)
+                            park_name = park_match.group(1).strip() if park_match else "Ontario Parks"
+                            
+                            # Parse arrival date
+                            lines = [l.strip() for l in text_content.split("\n") if l.strip()]
+                            arrival_date = ""
+                            for idx, line in enumerate(lines):
+                                if line.lower() == "arrival":
+                                    if idx + 1 < len(lines):
+                                        arrival_date = lines[idx+1]
+                                    break
+                                    
+                            # Escape text values for safety
+                            safe_park = escape_html(park_name)
+                            safe_date = escape_html(arrival_date)
+                            
+                            # Send Telegram notification card
+                            verify_msg = (
+                                f"🔔 <b>Ontario Parks Check-in Reminder!</b> 🔔\n\n"
+                                f"📍 <b>Park:</b> {safe_park}\n"
+                                f"📅 <b>Arrival Date:</b> {safe_date}\n\n"
+                                f"👉 <a href=\"{checkin_url}\"><b>Check in online now</b></a>"
+                            )
+                            
+                            print(f"Sending check-in reminder for Message-ID: {msg_id}...")
+                            success = send_telegram_message(config["telegram_token"], config["telegram_chat_id"], verify_msg)
+                            if success:
+                                notified_ids.add(msg_id)
+                                
+        mail.close()
+        mail.logout()
+    except Exception as e:
+        print(f"Error checking reminders: {e}")
         
-    return {
-        "status": "not_found",
-        "message": "⚠️ Checked for email from Ontario Parks, but no new emails received within 60 seconds.",
-        "conclusion": "some issues to check (no email received)"
-    }
+    try:
+        with open(notified_file, "w") as f:
+            json.dump(list(notified_ids), f)
+    except Exception:
+        pass
 
-def verify_email_after_transaction_task(transaction_type, transaction_time):
-    # Wait first for email latency, e.g. 5 seconds
-    time.sleep(5)
-    
-    current_config = load_config()
-    token = current_config["telegram_token"]
-    chat_id = current_config["telegram_chat_id"]
-    
-    # Check email
-    result = check_recent_email_after_transaction(current_config, transaction_type, transaction_time)
-    
-    if result["status"] == "found":
-        msg_text = (
-            f"✉️ <b>Ontario Parks Email Verification:</b>\n"
-            f"📥 Checked for email from Ontario Parks.\n\n"
-            f"📧 <b>Sender:</b> {result['sender']}\n"
-            f"📅 <b>Time:</b> {result['time']}\n"
-            f"📝 <b>Subject:</b> {result['subject']}\n"
-            f"🔍 <b>Summary:</b> {result['summary']}\n\n"
-            f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
-        )
-    elif result["status"] == "not_found":
-        msg_text = (
-            f"✉️ <b>Ontario Parks Email Verification:</b>\n"
-            f"📥 Checked for email from Ontario Parks.\n\n"
-            f"{result['message']}\n\n"
-            f"🤖 <b>Conclusion:</b> <b>{result['conclusion']}</b>"
-        )
-    else:
-        # skipped
-        msg_text = result["message"]
-        
-    send_telegram_message(token, chat_id, msg_text)
 
 def format_reservations_html():
     json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_reservations.json")
@@ -738,6 +684,18 @@ def main():
     
     print(f"Starting Telegram Bot command listener for chat ID: {CHAT_ID}...")
     send_telegram_message(TOKEN, CHAT_ID, "🤖 AnivaWay Bot is online and listening for commands!")
+    
+    # Start background loop for check-in reminders
+    def reminder_loop():
+        time.sleep(30) # Wait 30 seconds after bot boot
+        while True:
+            try:
+                check_and_notify_checkin_reminders()
+            except Exception as e:
+                print(f"Error in reminder loop: {e}")
+            time.sleep(1800) # Check every 30 minutes
+            
+    threading.Thread(target=reminder_loop, daemon=True).start()
     
     offset = None
     url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
