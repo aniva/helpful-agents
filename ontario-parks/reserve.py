@@ -1200,6 +1200,42 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         time.sleep(5)
         dismiss_park_alerts(page)
         
+        # Handle multi-location selection page (e.g. Wasaga Beach with multiple Areas)
+        list_toggle = page.locator("#list-view-button-button")
+        if list_toggle.count() > 0 and list_toggle.is_visible():
+            print("Multi-location selection page detected. Switching to List view...")
+            list_toggle.click()
+            time.sleep(3)
+            
+            options = page.locator("button.map-link-button, a.map-link-button").all()
+            target_option = None
+            
+            # Match preferred "Area 6" first
+            for opt in options:
+                txt = opt.text_content() or ""
+                if "Area 6" in txt and "Available" in txt:
+                    target_option = opt
+                    break
+                    
+            # Fallback to any available area
+            if not target_option:
+                for opt in options:
+                    txt = opt.text_content() or ""
+                    if "Available" in txt:
+                        target_option = opt
+                        break
+                        
+            if target_option:
+                area_name = (target_option.text_content() or "").strip().replace("\n", " ")
+                print(f"Selecting sub-location: '{area_name}'...")
+                target_option.click()
+                time.sleep(5)
+                dismiss_park_alerts(page)
+            else:
+                print("Error: No available sub-locations found on the selection page!")
+                browser.close()
+                return False
+                
         consent_btn = page.locator("#consentButton")
         if consent_btn.count() > 0 and consent_btn.is_visible():
             print("Accepting rules consent...")
