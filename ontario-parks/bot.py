@@ -815,7 +815,7 @@ def main():
     set_bot_commands(TOKEN)
     
     print(f"Starting Telegram Bot command listener for chat ID: {CHAT_ID}...")
-    send_telegram_message(TOKEN, CHAT_ID, "🤖 AnivaWay Bot is online and listening for commands!")
+    send_telegram_message(TOKEN, CHAT_ID, "🤖 AnivaWay Bot is online and listening for commands!", MAIN_REPLY_KEYBOARD)
     
     # Start background loop for check-in reminders
     def reminder_loop():
