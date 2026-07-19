@@ -39,7 +39,7 @@ def check_and_notify_checkin_reminders():
         mail.login(email_user, app_password)
         mail.select("inbox")
         
-        search_query = '(FROM "confirmations@camis.com" SUBJECT "It\'s time to check in online!")'
+        search_query = '(FROM "confirmations@camis.com" SUBJECT "check in online")'
         status, messages = mail.search(None, search_query)
         if status == "OK" and messages[0]:
             mail_ids = messages[0].split()
