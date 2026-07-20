@@ -1,0 +1,14 @@
+#!/bin/bash
+# Git pre-commit hook to clean up Windows NTFS Zone.Identifier metadata files
+
+echo "🧹 [Pre-Commit Hook] Cleaning up any Windows Zone.Identifier metadata files..."
+
+# Find and delete Zone.Identifier files from the filesystem
+find . -name "*Zone.Identifier*" -type f -delete
+
+# Remove them from the git staging index if they were accidentally staged
+git rm --cached -f *Zone.Identifier* 2>/dev/null || true
+git rm --cached -f *:Zone.Identifier 2>/dev/null || true
+
+echo "✅ [Pre-Commit Hook] Cleanup complete."
+exit 0

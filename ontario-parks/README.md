@@ -35,7 +35,13 @@ uv run playwright install chromium
 uv run playwright install-deps
 ```
 
-### 4. Configuration
+### 4. Enable Pre-Commit Clean Hook
+Enable the repository's custom pre-commit hook to automatically clean up Windows NTFS metadata `Zone.Identifier` files from the workspace before staging/committing files:
+```bash
+git config core.hooksPath githooks
+```
+
+### 5. Configuration
 You can configure the credentials and settings using either **a configuration JSON file** or **environment variables (a `.env` file)**.
 
 #### Option A: Using `.env` (Recommended)
@@ -72,7 +78,7 @@ Alternatively, create a configuration file named `ontario_parks_config.json` in 
 > * `gmail_app_password` / `GMAIL_APP_PASSWORD` must be a 16-character Gmail App Password generated in your Google Account security settings, and IMAP access must be enabled in your Gmail settings.
 > * Both `.env` and `ontario_parks_config.json` are excluded from git tracking to prevent accidental credential leakage.
 
-### 5. Telegram Bot Setup (Step-by-Step)
+### 6. Telegram Bot Setup (Step-by-Step)
 
 To integrate the bot with Telegram, you need to create your own bot credentials and configure your whitelisted Chat ID:
 

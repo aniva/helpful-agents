@@ -7,7 +7,8 @@ auth_state.json
 .venv/
 __pycache__/
 .pytest_cache/
-*Zone.Identifier
+*Zone.Identifier*
+*:Zone.Identifier
 !artefacts/*.png
 !media/*.png
 
