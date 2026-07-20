@@ -122,3 +122,17 @@ You can interact with the bot in Telegram using both the quick reply buttons or 
 * `❌ Cancel Booking` / `/cancel_list`: Lists your active permits with individual buttons to cancel them.
 * `❓ Check Errors` / `/errors`: Sends the standard error trace of the last failed execution.
 * `/selftest`: Manually triggers a weekly self-test run (books a random park for Wednesday, verifies emails, and cancels the booking).
+
+---
+
+## 📱 Telegram Bot Interface Screenshots
+
+Here are some screenshots demonstrating the Telegram Bot's layout and functionality:
+
+| Bot Main Menu & Wizard | Active Permits List |
+|:---:|:---:|
+| ![Main Menu](media/telegram_menu.png) | ![Active Bookings List](media/telegram_list-bookings.png) |
+
+| Automated Weekly Self-Test | Error Checking |
+|:---:|:---:|
+| ![Weekly Self-Test](media/telegram_self-test.png) | ![Check Errors](media/telegram_check-errors.png) |

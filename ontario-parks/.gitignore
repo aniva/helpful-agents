@@ -9,5 +9,6 @@ __pycache__/
 .pytest_cache/
 *Zone.Identifier
 !artefacts/*.png
+!media/*.png
 
 
