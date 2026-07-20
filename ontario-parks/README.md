@@ -85,7 +85,7 @@ To resolve and configure your Telegram Chat ID automatically:
 
 ## Deploying as a Daemon (systemd)
 
-To keep the Telegram bot polling listener running persistently in the background on the `lanner-box`:
+To keep the Telegram bot polling listener running persistently in the background on your host PC/server:
 
 1. Copy the systemd user service file to your systemd user configuration directory:
    ```bash
