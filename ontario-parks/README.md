@@ -72,14 +72,25 @@ Alternatively, create a configuration file named `ontario_parks_config.json` in 
 > * `gmail_app_password` / `GMAIL_APP_PASSWORD` must be a 16-character Gmail App Password generated in your Google Account security settings, and IMAP access must be enabled in your Gmail settings.
 > * Both `.env` and `ontario_parks_config.json` are excluded from git tracking to prevent accidental credential leakage.
 
-### 5. Setup Telegram Chat ID
-To resolve and configure your Telegram Chat ID automatically:
-1. Open your Telegram app and send a message to your bot (e.g., `/start`).
-2. Run the helper setup command:
+### 5. Telegram Bot Setup (Step-by-Step)
+
+To integrate the bot with Telegram, you need to create your own bot credentials and configure your whitelisted Chat ID:
+
+#### A. Create the Bot via `@BotFather`
+1. Open your Telegram client, search for **`@BotFather`** (the official bot-creation bot), and start a chat.
+2. Send the command `/newbot` to start the creation wizard.
+3. **Name your Bot**: Enter a display name for your bot (e.g., `My Ontario Parks Bot`).
+4. **Choose a Username**: Enter a unique username ending with `bot` (e.g., `my_ontario_parks_bot`).
+5. **Get your Token**: BotFather will reply with a confirmation message containing your **HTTP API Token** (e.g., `123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`). Copy this token and add it to your configuration (either `TELEGRAM_TOKEN` in `.env` or `"telegram_token"` in `ontario_parks_config.json`).
+
+#### B. Start Chat and Resolve your `Chat ID`
+1. Click the link provided by BotFather (e.g., `t.me/your_bot_username`) to open a direct message thread.
+2. Click **Start** or send any text message (e.g., `/start` or `hello`).
+3. Run the automated Chat ID resolver tool from the project directory:
    ```bash
    uv run python reserve.py --setup-telegram
    ```
-3. The helper will poll your bot, capture the active Chat ID, write it to `ontario_parks_config.json` under `telegram_chat_id`, and send a verification test message.
+4. The script will query Telegram's API, identify your unique, private `Chat ID`, write it directly to your configuration under `telegram_chat_id` / `TELEGRAM_CHAT_ID`, and send a confirmation greeting card back to your Telegram chat.
 
 ---
 
@@ -120,9 +131,10 @@ To keep the Telegram bot polling listener running persistently in the background
 * Because all connections are **outbound**, you do not need to open any inbound ports, configure DMZs, or modify firewall rules on your home router. The host machine runs safely behind standard NAT.
 
 ### 🛡️ Access Control & Telegram Authentication
-* **Strict Chat ID Whitelisting**: By default, anyone on Telegram can look up your bot name and message it. To prevent unauthorized access, the bot implements **strict Chat ID filtering**.
-* The bot checks the unique chat identifier of every incoming message and inline callback query. If it does not match the configured `telegram_chat_id` (resolved during setup), the bot **silently ignores the update**.
-* Unauthorized users cannot trigger bookings, view active reservations, modify permits, or access any sensitive operations.
+* **Strict Chat ID Whitelisting**: By default, anyone on Telegram can search for your bot's username and message it. To prevent unauthorized access, the bot implements **strict Chat ID filtering**.
+* The bot evaluates the unique chat identifier of every incoming message and inline callback query. If it does not match the configured `telegram_chat_id` / `TELEGRAM_CHAT_ID` (resolved during setup), the bot **silently ignores the update**.
+* **1-on-1 Direct Message Privacy**: Setting up the bot in a 1-on-1 direct message conversation with your personal account is the most secure method. By design, Telegram DMs are strictly private—other users cannot join or view your conversation.
+* If another user messages your bot, Telegram spawns a completely separate, isolated chat thread for them. Since their Chat ID won't match your whitelisted ID, the bot will ignore them completely. They cannot trigger bookings, view active reservations, or access any sensitive operations.
 * **Local Credential Isolation**: All account passwords, plate details, and permit numbers are stored locally on your host PC/server (`.env` or `ontario_parks_config.json`) and are **never transmitted** over the Telegram network.
 
 ---
