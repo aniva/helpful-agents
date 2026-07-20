@@ -113,6 +113,20 @@ To keep the Telegram bot polling listener running persistently in the background
 
 ---
 
+## 🔒 Security & Router Configuration
+
+### 🌐 Home Router & Firewall Requirements
+* **No Port Forwarding Needed**: The bot daemon uses **long polling** (`getUpdates` HTTP queries) to receive updates from Telegram, and establishes outbound HTTPS/IMAP connections to automate checkouts and read verification emails.
+* Because all connections are **outbound**, you do not need to open any inbound ports, configure DMZs, or modify firewall rules on your home router. The host machine runs safely behind standard NAT.
+
+### 🛡️ Access Control & Telegram Authentication
+* **Strict Chat ID Whitelisting**: By default, anyone on Telegram can look up your bot name and message it. To prevent unauthorized access, the bot implements **strict Chat ID filtering**.
+* The bot checks the unique chat identifier of every incoming message and inline callback query. If it does not match the configured `telegram_chat_id` (resolved during setup), the bot **silently ignores the update**.
+* Unauthorized users cannot trigger bookings, view active reservations, modify permits, or access any sensitive operations.
+* **Local Credential Isolation**: All account passwords, plate details, and permit numbers are stored locally on your host PC/server (`.env` or `ontario_parks_config.json`) and are **never transmitted** over the Telegram network.
+
+---
+
 ## Bot Interaction Commands
 
 You can interact with the bot in Telegram using both the quick reply buttons or direct command inputs:
