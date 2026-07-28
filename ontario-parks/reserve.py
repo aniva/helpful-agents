@@ -439,8 +439,8 @@ def check_recent_email_after_transaction(config, transaction_type, transaction_t
                                 if transaction_type == "book" and is_cancel:
                                     continue
                                     
-                                # Skip check-in emails for transactional checks
-                                is_checkin = "check in" in lower_subject or "check-in" in lower_subject or "check in online" in lower_body
+                                # Skip check-in emails for transactional checks (subject-only to avoid matching confirmation body footers)
+                                is_checkin = any(k in lower_subject for k in ["check in", "check-in", "checkin"])
                                 if is_checkin:
                                     continue
                                     
