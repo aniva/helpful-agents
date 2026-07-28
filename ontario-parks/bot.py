@@ -12,6 +12,7 @@ import email
 from email.header import decode_header
 import email.utils
 from bs4 import BeautifulSoup
+import hashlib
 
 # Add current dir to path to import reserve
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -93,6 +94,18 @@ def background_email_monitor(transaction_type, transaction_time):
         f"⚠️ <b>Email Verification Timeout:</b> No {transaction_type} confirmation email found in your inbox after 10 minutes."
     )
 
+def poll_email_verification_for_selftest(transaction_type, transaction_time, max_attempts=6, delay=20):
+    for attempt in range(max_attempts):
+        result = check_recent_email_after_transaction(config, transaction_type, transaction_time)
+        if result.get("status") == "found":
+            return result
+        time.sleep(delay)
+    return {
+        "status": "not_found",
+        "message": f"No {transaction_type} email verified within {max_attempts * delay}s.",
+        "conclusion": "Timeout / Email not found"
+    }
+
 def run_self_test_flow():
     token = config["telegram_token"]
     chat_id = config["telegram_chat_id"]
@@ -129,6 +142,8 @@ def run_self_test_flow():
             f"⌛ <i>Attempting automated booking...</i>"
         )
         
+        book_transaction_time = datetime.datetime.now(datetime.timezone.utc)
+        
         # Book the park
         args = [sys.executable, "reserve.py", "book", "--park", park, "--date", target_date_str, "--headless", "true", "--skip-email-check"]
         metadata = {}
@@ -148,44 +163,116 @@ def run_self_test_flow():
             token, chat_id,
             f"✅ <b>Weekly Self-Test - Booking Successful!</b>\n"
             f"🔑 <b>Confirmation #:</b> {conf_num}\n\n"
-            f"⌛ <i>Attempting automated cancellation...</i>"
+            f"📥 <i>Verifying booking confirmation email...</i>"
         )
         
+        # Verify booking email
+        book_email_res = poll_email_verification_for_selftest("book", book_transaction_time, max_attempts=6, delay=20)
+        book_email_ok = book_email_res.get("status") == "found"
+        
+        if book_email_ok:
+            send_telegram_message(
+                token, chat_id,
+                f"✉️ <b>Booking Email Verified:</b> Received confirmation email at {book_email_res.get('time')}.\n\n"
+                f"⌛ <i>Attempting automated cancellation...</i>"
+            )
+        else:
+            send_telegram_message(
+                token, chat_id,
+                f"⚠️ <b>Booking Email Not Found:</b> Proceeding with cancellation test...\n\n"
+                f"⌛ <i>Attempting automated cancellation...</i>"
+            )
+            
         # Wait 5 seconds to let system settle
         time.sleep(5)
+        
+        cancel_transaction_time = datetime.datetime.now(datetime.timezone.utc)
         
         # Cancel the booking
         cancel_args = [sys.executable, "reserve.py", "cancel", "--reservation", conf_num, "--headless", "true", "--skip-email-check"]
         res = subprocess.run(cancel_args, capture_output=True, text=True, timeout=90)
         
-        if res.returncode == 0:
+        cancel_success = (res.returncode == 0)
+        cancel_email_ok = False
+        cancel_email_res = {}
+        
+        if cancel_success:
             send_telegram_message(
                 token, chat_id,
-                f"✅ <b>Weekly Self-Test Completed Successfully!</b>\n"
-                f"❌ Reservation <b>{conf_num}</b> was successfully cancelled."
+                f"❌ <b>Cancellation Request Submitted.</b>\n\n"
+                f"📥 <i>Verifying cancellation confirmation email...</i>"
             )
+            cancel_email_res = poll_email_verification_for_selftest("cancel", cancel_transaction_time, max_attempts=6, delay=20)
+            cancel_email_ok = cancel_email_res.get("status") == "found"
         else:
             global LAST_ERROR
             LAST_ERROR = f"Self-Test Cancellation failed with code {res.returncode}.\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-            send_telegram_message(
-                token, chat_id,
-                f"⚠️ <b>Weekly Self-Test Issue:</b> Booking was successful, but automated cancellation failed.\n"
-                f"Please cancel reservation <b>{conf_num}</b> manually.\n"
-                f"Use 'Check Errors' for details."
+            
+        # Overall status evaluation
+        if booking_success and book_email_ok and cancel_success and cancel_email_ok:
+            overall = "✅ <b>PASS (100% Verified)</b>"
+            summary_msg = (
+                f"🎉 <b>Weekly Self-Test Summary: {overall}</b>\n\n"
+                f"📍 <b>Park:</b> {park}\n"
+                f"📅 <b>Date:</b> Wednesday ({target_date_str})\n"
+                f"🔑 <b>Confirmation #:</b> {conf_num}\n\n"
+                f"📋 <b>Detailed Steps:</b>\n"
+                f"• 🌐 Playwright Booking: ✅ Pass\n"
+                f"• 📧 Booking Email IMAP: ✅ Verified ({book_email_res.get('time')})\n"
+                f"• 🌐 Playwright Cancellation: ✅ Pass\n"
+                f"• 📧 Cancellation Email IMAP: ✅ Verified ({cancel_email_res.get('time')})"
             )
+        else:
+            overall = "⚠️ <b>PARTIAL / ISSUES DETECTED</b>"
+            book_email_str = f"✅ Verified ({book_email_res.get('time')})" if book_email_ok else "⚠️ Not Verified"
+            cancel_str = "✅ Pass" if cancel_success else "❌ Failed"
+            cancel_email_str = f"✅ Verified ({cancel_email_res.get('time')})" if cancel_email_ok else ("⚠️ Not Verified" if cancel_success else "❌ N/A")
+            
+            summary_msg = (
+                f"⚠️ <b>Weekly Self-Test Summary: {overall}</b>\n\n"
+                f"📍 <b>Park:</b> {park}\n"
+                f"📅 <b>Date:</b> Wednesday ({target_date_str})\n"
+                f"🔑 <b>Confirmation #:</b> {conf_num}\n\n"
+                f"📋 <b>Detailed Steps:</b>\n"
+                f"• 🌐 Playwright Booking: ✅ Pass\n"
+                f"• 📧 Booking Email IMAP: {book_email_str}\n"
+                f"• 🌐 Playwright Cancellation: {cancel_str}\n"
+                f"• 📧 Cancellation Email IMAP: {cancel_email_str}\n\n"
+            )
+            if not cancel_success:
+                summary_msg += f"⚠️ <b>Action Required:</b> Cancellation failed. Please cancel reservation <b>{conf_num}</b> manually.\nUse 'Check Errors' for details."
+                
+        send_telegram_message(token, chat_id, summary_msg)
             
     except Exception as e:
         send_telegram_message(token, chat_id, f"❌ <b>Weekly Self-Test Exception:</b> {e}")
     finally:
         release_operation()
 
+def get_selftest_schedule(config):
+    # Use telegram_chat_id or email as unique seed
+    user_seed = str(config.get("telegram_chat_id") or config.get("email") or "default")
+    hash_int = int(hashlib.md5(user_seed.encode("utf-8")).hexdigest(), 16)
+    # Stagger within 06:00 to 09:00 (180 minutes = 10800 seconds)
+    total_offset_secs = hash_int % (180 * 60) # 0 to 10799 seconds
+    offset_hours = total_offset_secs // 3600 # 0, 1, or 2 (6am, 7am, 8am)
+    offset_minutes = (total_offset_secs % 3600) // 60 # 0 to 59
+    target_hour = 6 + offset_hours
+    target_minute = offset_minutes
+    return target_hour, target_minute
+
 def selftest_loop():
     time.sleep(60) # Wait 60 seconds after bot boot
+    target_hour, target_minute = get_selftest_schedule(config)
+    print(f"Scheduled weekly self-test for Mondays at {target_hour:02d}:{target_minute:02d} (staggered per-user offset).")
+    
     while True:
         try:
             now = datetime.datetime.now() # Local time
-            # Check if it is Monday (weekday = 0) and the hour is 7am
-            if now.weekday() == 0 and now.hour == 7:
+            target_hour, target_minute = get_selftest_schedule(config)
+            
+            # Check if it is Monday (weekday = 0) and current time matches or passed target_time
+            if now.weekday() == 0 and (now.hour > target_hour or (now.hour == target_hour and now.minute >= target_minute)):
                 last_date = ""
                 json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_selftest.json")
                 if os.path.exists(json_path):
@@ -202,6 +289,7 @@ def selftest_loop():
                     with open(json_path, "w", encoding="utf-8") as f:
                         json.dump({"last_run_date": today_str}, f)
                     
+                    print(f"Triggering scheduled weekly self-test at {now.strftime('%Y-%m-%d %H:%M:%S')}...")
                     threading.Thread(target=run_self_test_flow, daemon=True).start()
         except Exception as e:
             print(f"Error in selftest_loop: {e}")
