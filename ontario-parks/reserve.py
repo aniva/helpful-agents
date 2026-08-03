@@ -1268,11 +1268,12 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
 
         print("Locating available slot cell...")
         headers = page.locator("table.chart tr").first.locator("td, th").all()
-        target_col_text = target_date.strftime("%b %d")
+        target_col_text = f"{target_date.strftime('%b')} {target_date.day}"
+        target_col_text_padded = target_date.strftime("%b %d")
         col_index = -1
         for idx, h in enumerate(headers):
             text = h.inner_text().strip()
-            if target_col_text in text:
+            if target_col_text in text or target_col_text_padded in text:
                 col_index = idx
                 break
                 
