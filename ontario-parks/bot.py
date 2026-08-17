@@ -358,6 +358,16 @@ def run_subprocess_with_progress(args, op_name, timeout_secs, out_metadata=None)
     finally:
         timer.cancel()
 
+def clean_park_name(name):
+    if not name:
+        return ""
+    import re
+    cleaned = re.sub(r"\s*\([^)]*\)", "", name)
+    cleaned = re.sub(r"\s+(?:Area|Beach|Zone)\s*\d*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+\d+$", "", cleaned)
+    cleaned = cleaned.replace("Provincial Park", "").replace("provincial park", "").strip()
+    return cleaned
+
 def add_recent_park(park_name):
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recent_parks.json")
     recent = []
@@ -367,8 +377,8 @@ def add_recent_park(park_name):
                 recent = json.load(f)
         except Exception:
             pass
-    # Normalize name (remove " Provincial Park" suffix)
-    clean = park_name.replace(" Provincial Park", "").strip()
+    # Normalize name to official park search name (strip sub-location qualifiers)
+    clean = clean_park_name(park_name)
     if clean in recent:
         recent.remove(clean)
     recent.insert(0, clean)
@@ -388,6 +398,17 @@ def get_recent_parks_keyboard():
                 recent = json.load(f)
         except Exception:
             pass
+            
+    # Clean and deduplicate entries
+    cleaned_recent = []
+    seen = set()
+    for p in recent:
+        c = clean_park_name(p)
+        if c and c not in seen:
+            seen.add(c)
+            cleaned_recent.append(c)
+            
+    recent = cleaned_recent
     if not recent:
         recent = ["Sibbald Point", "Presqu'ile", "Wasaga Beach"]
         

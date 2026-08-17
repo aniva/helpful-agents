@@ -61,6 +61,16 @@ PARKS = {
     }
 }
 
+def clean_park_name(name):
+    if not name:
+        return ""
+    import re
+    cleaned = re.sub(r"\s*\([^)]*\)", "", name)
+    cleaned = re.sub(r"\s+(?:Area|Beach|Zone)\s*\d*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+\d+$", "", cleaned)
+    cleaned = cleaned.replace("Provincial Park", "").replace("provincial park", "").strip()
+    return cleaned
+
 WEATHER_CODES = {
     0: "Sunny/Clear",
     1: "Mainly Clear",
@@ -1138,10 +1148,10 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
     
     selected_park = None
     if target_park_override:
-        clean_override = target_park_override.split("(")[0].replace("Provincial Park", "").strip().lower()
+        clean_override = clean_park_name(target_park_override).lower()
         for p in ranked_parks:
-            clean_p = p["name"].replace("Provincial Park", "").strip().lower()
-            if clean_override in clean_p or clean_p in clean_override:
+            clean_p = clean_park_name(p["name"]).lower()
+            if clean_override == clean_p or clean_override in clean_p or clean_p in clean_override:
                 selected_park = p
                 break
         if not selected_park:
