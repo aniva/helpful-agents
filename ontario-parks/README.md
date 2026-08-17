@@ -98,25 +98,39 @@ To integrate the bot with Telegram, you need to create your own bot credentials 
    ```
 4. The script will query Telegram's API, identify your unique, private `Chat ID`, write it directly to your configuration under `telegram_chat_id` / `TELEGRAM_CHAT_ID`, and send a confirmation greeting card back to your Telegram chat.
 
+### 7. Discord Bot Setup (Optional / In Parallel)
+
+You can run the Discord bot alongside Telegram to control reservations via an interactive control dashboard (select dropdowns & buttons) and slash commands:
+
+1. **Create Bot on Discord Developer Portal**:
+   - Go to [Discord Developer Portal](https://discord.com/developers/applications) and create a **New Application**.
+   - Under **Bot**, click **Reset Token** and copy your `DISCORD_TOKEN`.
+   - Enable **Message Content Intent** under *Privileged Gateway Intents*.
+2. **Invite Bot**:
+   - Under **OAuth2** &rarr; **URL Generator**, select scopes `bot` and `applications.commands`.
+   - Permissions: `Send Messages`, `Embed Links`, `Attach Files`, `Use Slash Commands`.
+   - Open the generated invite URL to add the bot to your Discord server.
+3. **Configure User & Channel Whitelist**:
+   - Add your `DISCORD_ALLOWED_USER_IDS` (your personal Discord User ID) and `DISCORD_CHANNEL_ID` (the dedicated private channel) to `.env` or `ontario_parks_config.json`.
+
 ---
 
 ## Deploying as a Daemon (systemd)
 
-To keep the Telegram bot polling listener running persistently in the background on your host PC/server:
+To keep the Telegram and Discord bot listeners running persistently in the background on your host PC/server:
 
-1. Copy the systemd user service file to your systemd user configuration directory:
+1. Copy the systemd user service files to your systemd user configuration directory:
    ```bash
    mkdir -p ~/.config/systemd/user/
-   cp ontario_parks_bot.service ~/.config/systemd/user/
+   cp ontario_parks_bot.service ontario_parks_discord.service ~/.config/systemd/user/
    ```
 
-2. Reload systemd daemon config and enable/start the service:
+2. Reload systemd daemon config and enable/start the services:
    ```bash
    systemctl --user daemon-reload
-   systemctl --user enable ontario_parks_bot.service
-   systemctl --user start ontario_parks_bot.service
+   systemctl --user enable ontario_parks_bot.service ontario_parks_discord.service
+   systemctl --user start ontario_parks_bot.service ontario_parks_discord.service
    ```
-
 3. Enable **linger** for your user account so systemd user services continue running after you log out of your SSH session:
    ```bash
    loginctl enable-linger $USER

@@ -178,6 +178,9 @@ def load_config():
     config["phone"] = os.environ.get("ONTARIO_PARKS_PHONE", config.get("phone", ""))
     config["telegram_token"] = os.environ.get("TELEGRAM_TOKEN", config.get("telegram_token", ""))
     config["telegram_chat_id"] = os.environ.get("TELEGRAM_CHAT_ID", config.get("telegram_chat_id", ""))
+    config["discord_token"] = os.environ.get("DISCORD_TOKEN", config.get("discord_token", ""))
+    config["discord_allowed_user_ids"] = os.environ.get("DISCORD_ALLOWED_USER_IDS", config.get("discord_allowed_user_ids", ""))
+    config["discord_channel_id"] = os.environ.get("DISCORD_CHANNEL_ID", config.get("discord_channel_id", ""))
     config["gmail_app_password"] = os.environ.get("GMAIL_APP_PASSWORD", config.get("gmail_app_password", ""))
     config["previously_selected_park"] = config.get("previously_selected_park", "")
     

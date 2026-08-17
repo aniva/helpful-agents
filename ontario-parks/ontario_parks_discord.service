@@ -1,0 +1,15 @@
+[Unit]
+Description=Ontario Parks Discord Booking Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ontario-parks
+ExecStart=%h/ontario-parks/.venv/bin/python %h/ontario-parks/discord_bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
