@@ -471,119 +471,149 @@ async def launch_cancellation_flow(interaction: discord.Interaction, conf_num, p
 # -------------------------------------------------------------
 
 async def handle_list_command(interaction: discord.Interaction):
-    # Send immediate visible status card (matching Telegram behavior)
-    status_embed = discord.Embed(
-        title="🔍 Checking Active Reservations...",
-        description="⏳ Logging into Ontario Parks account to fetch live bookings... Please wait.",
-        color=0xf39c12
-    )
-    if not interaction.response.is_done():
-        await interaction.response.send_message(embed=status_embed, ephemeral=False)
-        msg = await interaction.original_response()
-    else:
-        msg = await interaction.followup.send(embed=status_embed, ephemeral=False)
-
-    loop = asyncio.get_running_loop()
-    
-    def run_live_list():
-        try:
-            res = subprocess.run(
-                [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "list", "--headless", "true"],
-                capture_output=True, text=True, timeout=60
-            )
-            return res.returncode == 0
-        except Exception as ex:
-            print(f"Error running live list: {ex}")
-            return False
-
-    await loop.run_in_executor(None, run_live_list)
-    
-    bookings = get_active_reservations()
-    if not bookings:
-        empty_embed = discord.Embed(
-            title="ℹ️ No Active Reservations Found",
-            description="You currently have no active vehicle permits booked on your Ontario Parks account.\nUse the menu to book a permit!",
-            color=0x95a5a6
+    if not acquire_operation("Checking Active Reservations"):
+        busy_embed = discord.Embed(
+            title="⚠️ Operation In Progress",
+            description=f"Another operation is currently running (**{CURRENT_OPERATION}**).\nPlease wait for it to complete.",
+            color=0xf1c40f
         )
-        await msg.edit(embed=empty_embed, view=None)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=busy_embed, ephemeral=True)
+        else:
+            await interaction.followup.send(embed=busy_embed, ephemeral=True)
         return
 
-    desc_lines = []
-    for idx, b in enumerate(bookings, 1):
-        park = b.get("park") or b.get("park_name") or "Unknown Park"
-        date_str = b.get("date") or b.get("date_str") or "Unknown Date"
-        conf_num = b.get("reservation_number") or b.get("conf_number") or "N/A"
-        vehicle = b.get("vehicle", "")
-        occupant = b.get("occupant", "")
-        
-        alerts = fetch_park_alerts(park)
-        if alerts:
-            alert_lines = [f"• **{a['type']}:** {a['description'].replace(chr(10), ' ')}" for a in alerts]
-            alerts_text = "\n".join(alert_lines)
-        else:
-            alerts_text = "✅ No active alerts. Safe for swimming! 🏊‍♂️"
-            
-        vehicle_str = f"\n🚗 **Vehicle:** `{vehicle}` ({occupant})" if vehicle else ""
-        desc_lines.append(
-            f"**{idx}. {park}**\n"
-            f"📅 **Date:** `{date_str}`\n"
-            f"🔑 **Confirmation #:** `{conf_num}`{vehicle_str}\n"
-            f"🚨 **Alerts:**\n{alerts_text}\n"
-            f"────────────"
+    try:
+        # Send immediate visible status card (matching Telegram behavior)
+        status_embed = discord.Embed(
+            title="🔍 Checking Active Reservations...",
+            description="⏳ Logging into Ontario Parks account to fetch live bookings... Please wait.",
+            color=0xf39c12
         )
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=status_embed, ephemeral=False)
+            msg = await interaction.original_response()
+        else:
+            msg = await interaction.followup.send(embed=status_embed, ephemeral=False)
 
-    res_embed = discord.Embed(
-        title="📋 Active Ontario Parks Bookings",
-        description="\n".join(desc_lines),
-        color=0x2ecc71
-    )
-    view = CancelConfirmationView(bookings)
-    await msg.edit(embed=res_embed, view=view)
+        loop = asyncio.get_running_loop()
+        
+        def run_live_list():
+            try:
+                res = subprocess.run(
+                    [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "list", "--headless", "true"],
+                    capture_output=True, text=True, timeout=60
+                )
+                return res.returncode == 0
+            except Exception as ex:
+                print(f"Error running live list: {ex}")
+                return False
+
+        await loop.run_in_executor(None, run_live_list)
+        
+        bookings = get_active_reservations()
+        if not bookings:
+            empty_embed = discord.Embed(
+                title="ℹ️ No Active Reservations Found",
+                description="You currently have no active vehicle permits booked on your Ontario Parks account.\nUse the menu to book a permit!",
+                color=0x95a5a6
+            )
+            await msg.edit(embed=empty_embed, view=None)
+            return
+
+        desc_lines = []
+        for idx, b in enumerate(bookings, 1):
+            park = b.get("park") or b.get("park_name") or "Unknown Park"
+            date_str = b.get("date") or b.get("date_str") or "Unknown Date"
+            conf_num = b.get("reservation_number") or b.get("conf_number") or "N/A"
+            vehicle = b.get("vehicle", "")
+            occupant = b.get("occupant", "")
+            
+            alerts = fetch_park_alerts(park)
+            if alerts:
+                alert_lines = [f"• **{a['type']}:** {a['description'].replace(chr(10), ' ')}" for a in alerts]
+                alerts_text = "\n".join(alert_lines)
+            else:
+                alerts_text = "✅ No active alerts. Safe for swimming! 🏊‍♂️"
+                
+            vehicle_str = f"\n🚗 **Vehicle:** `{vehicle}` ({occupant})" if vehicle else ""
+            desc_lines.append(
+                f"**{idx}. {park}**\n"
+                f"📅 **Date:** `{date_str}`\n"
+                f"🔑 **Confirmation #:** `{conf_num}`{vehicle_str}\n"
+                f"🚨 **Alerts:**\n{alerts_text}\n"
+                f"────────────"
+            )
+
+        res_embed = discord.Embed(
+            title="📋 Active Ontario Parks Bookings",
+            description="\n".join(desc_lines),
+            color=0x2ecc71
+        )
+        view = CancelConfirmationView(bookings)
+        await msg.edit(embed=res_embed, view=view)
+    finally:
+        release_operation()
 
 async def handle_cancel_list_command(interaction: discord.Interaction):
-    # Send immediate visible status card (matching Telegram behavior)
-    status_embed = discord.Embed(
-        title="🔍 Fetching Reservations...",
-        description="⏳ Checking active permits to cancel... Please wait.",
-        color=0xf39c12
-    )
-    if not interaction.response.is_done():
-        await interaction.response.send_message(embed=status_embed, ephemeral=False)
-        msg = await interaction.original_response()
-    else:
-        msg = await interaction.followup.send(embed=status_embed, ephemeral=False)
-
-    loop = asyncio.get_running_loop()
-    
-    def run_live_list():
-        try:
-            res = subprocess.run(
-                [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "list", "--headless", "true"],
-                capture_output=True, text=True, timeout=60
-            )
-            return res.returncode == 0
-        except Exception:
-            return False
-
-    await loop.run_in_executor(None, run_live_list)
-    
-    bookings = get_active_reservations()
-    if not bookings:
-        empty_embed = discord.Embed(
-            title="❌ Cancel Booking",
-            description="No active bookings available to cancel.",
-            color=0x95a5a6
+    if not acquire_operation("Fetching Reservations to Cancel"):
+        busy_embed = discord.Embed(
+            title="⚠️ Operation In Progress",
+            description=f"Another operation is currently running (**{CURRENT_OPERATION}**).\nPlease wait for it to complete.",
+            color=0xf1c40f
         )
-        await msg.edit(embed=empty_embed, view=None)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=busy_embed, ephemeral=True)
+        else:
+            await interaction.followup.send(embed=busy_embed, ephemeral=True)
         return
 
-    cancel_embed = discord.Embed(
-        title="❌ Select a Reservation to Cancel",
-        description="Click one of the buttons below to cancel that permit directly:",
-        color=0xe74c3c
-    )
-    view = CancelConfirmationView(bookings)
-    await msg.edit(embed=cancel_embed, view=view)
+    try:
+        # Send immediate visible status card (matching Telegram behavior)
+        status_embed = discord.Embed(
+            title="🔍 Fetching Reservations...",
+            description="⏳ Checking active permits to cancel... Please wait.",
+            color=0xf39c12
+        )
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=status_embed, ephemeral=False)
+            msg = await interaction.original_response()
+        else:
+            msg = await interaction.followup.send(embed=status_embed, ephemeral=False)
+
+        loop = asyncio.get_running_loop()
+        
+        def run_live_list():
+            try:
+                res = subprocess.run(
+                    [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "list", "--headless", "true"],
+                    capture_output=True, text=True, timeout=60
+                )
+                return res.returncode == 0
+            except Exception:
+                return False
+
+        await loop.run_in_executor(None, run_live_list)
+        
+        bookings = get_active_reservations()
+        if not bookings:
+            empty_embed = discord.Embed(
+                title="❌ Cancel Booking",
+                description="No active bookings available to cancel.",
+                color=0x95a5a6
+            )
+            await msg.edit(embed=empty_embed, view=None)
+            return
+
+        cancel_embed = discord.Embed(
+            title="❌ Select a Reservation to Cancel",
+            description="Click one of the buttons below to cancel that permit directly:",
+            color=0xe74c3c
+        )
+        view = CancelConfirmationView(bookings)
+        await msg.edit(embed=cancel_embed, view=view)
+    finally:
+        release_operation()
 
 async def handle_selftest_command(interaction: discord.Interaction):
     if not acquire_operation("Weekly Self-Test"):
