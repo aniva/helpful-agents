@@ -300,19 +300,38 @@ def create_dashboard_embed():
 
 async def launch_booking_flow(interaction: discord.Interaction, park_name, date_str):
     if not acquire_operation(f"Booking {park_name}"):
-        await interaction.response.send_message(
-            f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>). Please wait for it to complete.",
-            ephemeral=True
+        busy_embed = discord.Embed(
+            title="⚠️ Operation In Progress",
+            description=f"Another operation is currently running (**{CURRENT_OPERATION}**).\nPlease wait for it to complete.",
+            color=0xf1c40f
         )
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=busy_embed, ephemeral=True)
+        else:
+            await interaction.followup.send(embed=busy_embed, ephemeral=True)
         return
 
     embed = discord.Embed(
         title=f"🌲 Booking in Progress: {park_name}",
-        description=f"📅 **Date:** `{date_str}`\n⏳ Initializing browser session...",
+        description=(
+            f"📅 **Date:** `{date_str}`\n"
+            f"⏳ Initializing browser session...\n\n"
+            f"🧵 *All live progress steps and screenshots are posted in the thread below.*"
+        ),
         color=0xf39c12
     )
     await interaction.response.send_message(embed=embed, ephemeral=False)
     msg = await interaction.original_response()
+
+    # Create thread attached to this message for progress screenshots
+    thread = None
+    try:
+        thread = await msg.create_thread(
+            name=f"Booking: {park_name} ({date_str})",
+            auto_archive_duration=60
+        )
+    except Exception as ex:
+        print(f"Could not create thread for booking: {ex}")
 
     loop = asyncio.get_running_loop()
     
@@ -357,7 +376,6 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
                         elif p.startswith("Image:"):
                             current_image = p.replace("Image:", "").strip()
                     
-                    # Update Discord embed
                     step_embed = discord.Embed(
                         title=f"🌲 Booking {park_name}: {current_step}",
                         description=f"📅 **Date:** `{date_str}`\n📝 **Status:** {current_desc}",
@@ -369,10 +387,11 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
                         file_to_send = discord.File(current_image, filename="progress.png")
                         step_embed.set_image(url="attachment://progress.png")
                         
-                    asyncio.run_coroutine_threadsafe(
-                        msg.edit(embed=step_embed, attachments=[file_to_send] if file_to_send else []),
-                        loop
-                    )
+                    if thread and loop:
+                        asyncio.run_coroutine_threadsafe(
+                            thread.send(embed=step_embed, file=file_to_send if file_to_send else discord.utils.MISSING),
+                            loop
+                        )
                 except Exception as ex:
                     print(f"Error parsing progress tag: {ex}")
                     
@@ -408,33 +427,69 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
         success, conf_number, stderr_out = await loop.run_in_executor(None, run_process)
         if success:
             add_cached_booking(park_name, date_str, conf_number)
+            alerts = fetch_park_alerts(park_name)
+            if alerts:
+                alert_lines = [f"• **{a['type']}:** {a['description']}" for a in alerts]
+                alerts_text = "\n".join(alert_lines)
+            else:
+                alerts_text = "✅ No active alerts. Safe for swimming! 🏊‍♂️"
+                
             success_embed = discord.Embed(
                 title="✅ Booking Confirmed Successfully!",
                 description=(
                     f"🌲 **Park:** {park_name}\n"
                     f"📅 **Date:** `{date_str}`\n"
                     f"🔑 **Confirmation Number:** `{conf_number}`\n\n"
-                    f"✉️ *Checking inbox for transaction receipt...*"
+                    f"🚨 **Alerts:**\n{alerts_text}\n\n"
+                    f"🧵 *All step-by-step progress screenshots are archived in the thread above.*"
                 ),
                 color=0x2ecc71
             )
             await msg.edit(embed=success_embed, attachments=[])
+            
+            if thread:
+                done_thread_embed = discord.Embed(
+                    title="✅ Booking Wizard Finished",
+                    description=f"Permit `{conf_number}` secured. Archiving thread.",
+                    color=0x2ecc71
+                )
+                await thread.send(embed=done_thread_embed)
+                try:
+                    await thread.edit(archived=True)
+                except Exception:
+                    pass
         else:
             error_embed = discord.Embed(
                 title="❌ Booking Failed",
-                description=f"Automated booking for **{park_name}** on `{date_str}` could not be completed.\nUse `❓ Check Errors` for details.",
+                description=f"Automated booking for **{park_name}** on `{date_str}` could not be completed.\nUse `❓ Check Errors` or view the thread for details.",
                 color=0xe74c3c
             )
             await msg.edit(embed=error_embed, attachments=[])
+            if thread:
+                fail_thread_embed = discord.Embed(
+                    title="❌ Booking Process Ended with Errors",
+                    description=f"```\n{LAST_ERROR[:1800]}\n```",
+                    color=0xe74c3c
+                )
+                await thread.send(embed=fail_thread_embed)
+                try:
+                    await thread.edit(archived=True)
+                except Exception:
+                    pass
     finally:
         release_operation()
 
 async def launch_cancellation_flow(interaction: discord.Interaction, conf_num, park_name, date_str):
     if not acquire_operation(f"Cancelling {conf_num}"):
-        await interaction.response.send_message(
-            f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>).",
-            ephemeral=True
+        busy_embed = discord.Embed(
+            title="⚠️ Operation In Progress",
+            description=f"Another operation is currently running (**{CURRENT_OPERATION}**).\nPlease wait for it to complete.",
+            color=0xf1c40f
         )
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=busy_embed, ephemeral=True)
+        else:
+            await interaction.followup.send(embed=busy_embed, ephemeral=True)
         return
 
     embed = discord.Embed(
@@ -675,7 +730,8 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
             description=(
                 f"🌲 **Park:** {park}\n"
                 f"📅 **Date:** Wednesday (`{target_date_str}`)\n\n"
-                f"⌛ *Attempting automated booking...*"
+                f"⏳ *Testing automated booking, IMAP email check, and cancellation...*\n"
+                f"🧵 *All live step screenshots and debug logs are tracked in the thread below.*"
             ),
             color=0x9b59b6
         )
@@ -685,6 +741,21 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
             future = asyncio.run_coroutine_threadsafe(channel.send(embed=start_embed), loop)
             status_msg = future.result(timeout=10)
             
+        # Create thread attached to this status card
+        thread = None
+        if status_msg and loop:
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    status_msg.create_thread(
+                        name=f"Self-Test: {park} ({target_date_str})",
+                        auto_archive_duration=60
+                    ),
+                    loop
+                )
+                thread = future.result(timeout=10)
+            except Exception as ex:
+                print(f"Could not create thread for self-test: {ex}")
+
         book_transaction_time = datetime.datetime.now(datetime.timezone.utc)
         
         # Step 1: Book the park with real-time live step updates
@@ -735,9 +806,9 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
                         file_to_send = discord.File(cur_img, filename="progress.png")
                         step_embed.set_image(url="attachment://progress.png")
                         
-                    if status_msg and loop:
+                    if thread and loop:
                         asyncio.run_coroutine_threadsafe(
-                            status_msg.edit(embed=step_embed, attachments=[file_to_send] if file_to_send else []),
+                            thread.send(embed=step_embed, file=file_to_send if file_to_send else discord.utils.MISSING),
                             loop
                         )
                 except Exception:
@@ -767,31 +838,50 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
         if not booking_success:
             err_embed = discord.Embed(
                 title="❌ Self-Test Failed at Booking Step",
-                description=f"Automated booking for **{park}** on `{target_date_str}` failed.\nUse `❓ Check Errors` for details.",
+                description=f"Automated booking for **{park}** on `{target_date_str}` failed.\nUse `❓ Check Errors` or view the thread for details.",
                 color=0xe74c3c
             )
             if status_msg and loop:
                 asyncio.run_coroutine_threadsafe(status_msg.edit(embed=err_embed, attachments=[]), loop)
+            if thread and loop:
+                asyncio.run_coroutine_threadsafe(
+                    thread.send(embed=discord.Embed(title="❌ Self-Test Aborted", description="Booking step failed.", color=0xe74c3c)),
+                    loop
+                )
+                asyncio.run_coroutine_threadsafe(thread.edit(archived=True), loop)
             return
 
-        step2_embed = discord.Embed(
-            title="✅ Self-Test: Booking Successful!",
-            description=(
-                f"🌲 **Park:** {park}\n"
-                f"🔑 **Confirmation #:** `{conf_num}`\n\n"
-                f"📥 *Verifying booking confirmation email via IMAP...*"
-            ),
-            color=0x3498db
-        )
-        if status_msg and loop:
-            asyncio.run_coroutine_threadsafe(status_msg.edit(embed=step2_embed), loop)
+        if thread and loop:
+            step2_embed = discord.Embed(
+                title="✅ Booking Successful",
+                description=(
+                    f"🌲 **Park:** {park}\n"
+                    f"🔑 **Confirmation #:** `{conf_num}`\n\n"
+                    f"📥 *Verifying booking confirmation email via IMAP...*"
+                ),
+                color=0x3498db
+            )
+            asyncio.run_coroutine_threadsafe(thread.send(embed=step2_embed), loop)
 
         # Step 2: Verify booking email
         book_email_res = poll_email_verification_for_discord_selftest("book", book_transaction_time, max_attempts=6, delay=20)
         book_email_ok = book_email_res.get("status") == "found"
         
+        if thread and loop:
+            b_status_str = f"✅ Verified ({book_email_res.get('time')})" if book_email_ok else "⚠️ Email not found in mailbox"
+            asyncio.run_coroutine_threadsafe(
+                thread.send(embed=discord.Embed(title="📧 Booking Email Verification", description=b_status_str, color=0x2ecc71 if book_email_ok else 0xe67e22)),
+                loop
+            )
+
         time.sleep(5)
         cancel_transaction_time = datetime.datetime.now(datetime.timezone.utc)
+        
+        if thread and loop:
+            asyncio.run_coroutine_threadsafe(
+                thread.send(embed=discord.Embed(title="❌ Submitting Cancellation...", description=f"Cancelling reservation `{conf_num}`...", color=0xe67e22)),
+                loop
+            )
         
         # Step 3: Cancel the booking
         cancel_args = [
@@ -809,10 +899,27 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
         cancel_email_ok = False
         cancel_email_res = {}
         if cancel_success:
+            if thread and loop:
+                asyncio.run_coroutine_threadsafe(
+                    thread.send(embed=discord.Embed(title="✅ Reservation Cancelled on Ontario Parks", description=f"`{conf_num}` successfully cancelled. Checking cancellation email...", color=0x2ecc71)),
+                    loop
+                )
             cancel_email_res = poll_email_verification_for_discord_selftest("cancel", cancel_transaction_time, max_attempts=6, delay=20)
             cancel_email_ok = cancel_email_res.get("status") == "found"
+            if thread and loop:
+                ce_status_str = f"✅ Verified ({cancel_email_res.get('time')})" if cancel_email_ok else "⚠️ Cancellation email not found in mailbox"
+                asyncio.run_coroutine_threadsafe(
+                    thread.send(embed=discord.Embed(title="📧 Cancellation Email Verification", description=ce_status_str, color=0x2ecc71 if cancel_email_ok else 0xe67e22)),
+                    loop
+                )
+        else:
+            if thread and loop:
+                asyncio.run_coroutine_threadsafe(
+                    thread.send(embed=discord.Embed(title="❌ Cancellation Failed", description=f"Could not cancel `{conf_num}` via Playwright.", color=0xe74c3c)),
+                    loop
+                )
 
-        # Step 4: Summary Card
+        # Step 4: Summary Card in Main Channel
         if booking_success and book_email_ok and cancel_success and cancel_email_ok:
             overall = "✅ **PASS (100% Verified)**"
             summary_embed = discord.Embed(
@@ -825,7 +932,8 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
                     f"• 🌐 Playwright Booking: ✅ Pass\n"
                     f"• 📧 Booking Email IMAP: ✅ Verified ({book_email_res.get('time')})\n"
                     f"• 🌐 Playwright Cancellation: ✅ Pass\n"
-                    f"• 📧 Cancellation Email IMAP: ✅ Verified ({cancel_email_res.get('time')})"
+                    f"• 📧 Cancellation Email IMAP: ✅ Verified ({cancel_email_res.get('time')})\n\n"
+                    f"🧵 *All step-by-step progress screenshots are archived in the thread above.*"
                 ),
                 color=0x2ecc71
             )
@@ -844,12 +952,20 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
                     f"• 🌐 Playwright Booking: ✅ Pass\n"
                     f"• 📧 Booking Email IMAP: {b_str}\n"
                     f"• 🌐 Playwright Cancellation: {c_str}\n"
-                    f"• 📧 Cancellation Email IMAP: {ce_str}"
+                    f"• 📧 Cancellation Email IMAP: {ce_str}\n\n"
+                    f"🧵 *All step-by-step progress screenshots are archived in the thread above.*"
                 ),
                 color=0xe67e22
             )
         if status_msg and loop:
-            asyncio.run_coroutine_threadsafe(status_msg.edit(embed=summary_embed), loop)
+            asyncio.run_coroutine_threadsafe(status_msg.edit(embed=summary_embed, attachments=[]), loop)
+            
+        if thread and loop:
+            asyncio.run_coroutine_threadsafe(
+                thread.send(embed=discord.Embed(title="🏁 Self-Test Complete", description="All automated tests completed. Archiving thread.", color=0x2ecc71)),
+                loop
+            )
+            asyncio.run_coroutine_threadsafe(thread.edit(archived=True), loop)
     except Exception as ex:
         if status_msg and loop:
             err_embed = discord.Embed(
