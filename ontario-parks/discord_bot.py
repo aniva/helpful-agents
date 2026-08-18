@@ -324,7 +324,8 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
             "book",
             "--park", park_name,
             "--date", date_str,
-            "--headless", "true"
+            "--headless", "true",
+            "--skip-telegram"
         ]
         
         proc = subprocess.Popen(
@@ -375,13 +376,27 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
                 except Exception as ex:
                     print(f"Error parsing progress tag: {ex}")
                     
-            if "CONFIRMATION_NUMBER=" in line_str:
+            if "Captured confirmation number:" in line_str:
+                conf_number = line_str.split("Captured confirmation number:")[1].strip()
+            elif "CONFIRMATION_NUMBER=" in line_str:
                 conf_number = line_str.split("CONFIRMATION_NUMBER=")[1].strip()
+            elif "INOP26-" in line_str:
+                import re
+                m = re.search(r"INOP26-[A-Za-z0-9]+", line_str)
+                if m:
+                    conf_number = m.group(0)
                 
         proc.stdout.close()
         stderr_output = proc.stderr.read()
         proc.stderr.close()
         proc.wait()
+        
+        if not conf_number:
+            # Fallback check in active_reservations
+            for b in get_active_reservations():
+                if b.get("park") == park_name or b.get("park_name") == park_name:
+                    conf_number = b.get("reservation_number") or b.get("conf_number")
+                    break
         
         success = (proc.returncode == 0) and (conf_number is not None)
         if not success:
@@ -439,7 +454,8 @@ async def launch_cancellation_flow(interaction: discord.Interaction, conf_num, p
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"),
             "cancel",
             "--reservation", conf_num,
-            "--headless", "true"
+            "--headless", "true",
+            "--skip-telegram"
         ]
         res = subprocess.run(args, capture_output=True, text=True, timeout=120)
         if res.returncode != 0:
@@ -458,8 +474,8 @@ async def launch_cancellation_flow(interaction: discord.Interaction, conf_num, p
             await msg.edit(embed=done_embed)
         else:
             fail_embed = discord.Embed(
-                title="⚠️ Cancellation Issue",
-                description=f"Automated cancellation for **{conf_num}** failed.\nPlease check errors or cancel manually on ontarioparks.ca.",
+                title="❌ Cancellation Failed",
+                description=f"Could not cancel reservation **{conf_num}**.\nUse `❓ Check Errors` for details.",
                 color=0xe74c3c
             )
             await msg.edit(embed=fail_embed)
@@ -672,7 +688,16 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
         book_transaction_time = datetime.datetime.now(datetime.timezone.utc)
         
         # Step 1: Book the park with real-time live step updates
-        args = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "book", "--park", park, "--date", target_date_str, "--headless", "true", "--skip-email-check"]
+        args = [
+            sys.executable,
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"),
+            "book",
+            "--park", park,
+            "--date", target_date_str,
+            "--headless", "true",
+            "--skip-email-check",
+            "--skip-telegram"
+        ]
         proc = subprocess.Popen(
             args,
             stdout=subprocess.PIPE,
@@ -717,12 +742,26 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
                         )
                 except Exception:
                     pass
-            if "CONFIRMATION_NUMBER=" in line_str:
+            if "Captured confirmation number:" in line_str:
+                conf_num = line_str.split("Captured confirmation number:")[1].strip()
+            elif "CONFIRMATION_NUMBER=" in line_str:
                 conf_num = line_str.split("CONFIRMATION_NUMBER=")[1].strip()
+            elif "INOP26-" in line_str:
+                import re
+                m = re.search(r"INOP26-[A-Za-z0-9]+", line_str)
+                if m:
+                    conf_num = m.group(0)
                 
         proc.stdout.close()
         proc.stderr.close()
         proc.wait()
+        
+        if not conf_num:
+            # Fallback check in active_reservations
+            for b in get_active_reservations():
+                if b.get("park") == park or b.get("park_name") == park:
+                    conf_num = b.get("reservation_number") or b.get("conf_number")
+                    break
         
         booking_success = (proc.returncode == 0) and (conf_num is not None)
         if not booking_success:
@@ -755,7 +794,15 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
         cancel_transaction_time = datetime.datetime.now(datetime.timezone.utc)
         
         # Step 3: Cancel the booking
-        cancel_args = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "cancel", "--reservation", conf_num, "--headless", "true", "--skip-email-check"]
+        cancel_args = [
+            sys.executable,
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"),
+            "cancel",
+            "--reservation", conf_num,
+            "--headless", "true",
+            "--skip-email-check",
+            "--skip-telegram"
+        ]
         c_res = subprocess.run(cancel_args, capture_output=True, text=True, timeout=90)
         cancel_success = (c_res.returncode == 0)
         

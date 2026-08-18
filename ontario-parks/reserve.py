@@ -952,7 +952,7 @@ def list_reservations(email_user, password, headless=True):
         browser.close()
         return reservations
 
-def cancel_reservation(email_user, password, target_res_num, headless=True, skip_email_check=False):
+def cancel_reservation(email_user, password, target_res_num, headless=True, skip_email_check=False, skip_telegram=False):
     transaction_time = datetime.datetime.now(datetime.timezone.utc)
     print(f"Launching browser to cancel reservation {target_res_num}...")
     with sync_playwright() as p:
@@ -1023,7 +1023,7 @@ def cancel_reservation(email_user, password, target_res_num, headless=True, skip
                     browser.close()
                     
                     config = load_config()
-                    if config.get("telegram_chat_id"):
+                    if config.get("telegram_chat_id") and not skip_telegram:
                         cancel_msg = f"❌ <b>Reservation <a href=\"https://reservations.ontarioparks.ca/account/all-bookings\">{target_res_num}</a> has been successfully cancelled!</b>"
                         send_telegram_message(config["telegram_token"], config["telegram_chat_id"], cancel_msg)
                         
@@ -1066,7 +1066,7 @@ def cancel_reservation(email_user, password, target_res_num, headless=True, skip
         browser.close()
         return False
 
-def run_booking_flow(config, target_park_override=None, target_date_override=None, is_headless=True, request_approval_callback=None, progress_callback=None, forecast_only=False, skip_email_check=False):
+def run_booking_flow(config, target_park_override=None, target_date_override=None, is_headless=True, request_approval_callback=None, progress_callback=None, forecast_only=False, skip_email_check=False, skip_telegram=False):
     transaction_time = datetime.datetime.now(datetime.timezone.utc)
     config["final_amount"] = "Unknown"
     # Ask about date if not overridden
@@ -1452,7 +1452,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         f"Have a great kiting session! 🏄‍♂️💨"
     )
     
-    if config.get("telegram_chat_id"):
+    if config.get("telegram_chat_id") and not skip_telegram:
         print("\nSending Telegram notification message...")
         success = send_telegram_message(config["telegram_token"], config["telegram_chat_id"], msg_text)
         if success:
@@ -1488,7 +1488,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
                 
             send_telegram_message(config["telegram_token"], config["telegram_chat_id"], verify_msg)
     else:
-        print("\nTelegram chat ID not configured, skipped notification.")
+        print("\nTelegram chat ID not configured or skipped, notification not sent.")
         print("Formatted message:")
         print(msg_text.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", ""))
         
@@ -1501,12 +1501,12 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
     
     # Subcommands
-    # Subcommands
     book_parser = subparsers.add_parser("book", help="Book a daily vehicle permit")
     book_parser.add_argument("--park", help="Name of the park (e.g. 'Sibbald Point')")
     book_parser.add_argument("--date", help="Date: 'today', 'tomorrow', 'day_after', or YYYY-MM-DD")
     book_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true", help="Run headlessly")
     book_parser.add_argument("--skip-email-check", action="store_true", help="Skip email verification check")
+    book_parser.add_argument("--skip-telegram", action="store_true", help="Skip sending Telegram notification")
     
     list_parser = subparsers.add_parser("list", help="List active reservations")
     list_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
@@ -1515,6 +1515,7 @@ def main():
     cancel_parser.add_argument("--reservation", required=True, help="Reservation Receipt Number to cancel")
     cancel_parser.add_argument("--headless", type=str, choices=["true", "false"], default="true")
     cancel_parser.add_argument("--skip-email-check", action="store_true", help="Skip email verification check")
+    cancel_parser.add_argument("--skip-telegram", action="store_true", help="Skip sending Telegram notification")
     
     parser.add_argument("--forecast-only", action="store_true", help="Only show weather/wind forecast for today, tomorrow, and day after")
     parser.add_argument("--setup-telegram", action="store_true", help="Interact and resolve Telegram Chat ID dynamically")
@@ -1550,7 +1551,8 @@ def main():
             print("Error: 'ontario_parks_password' is not configured!")
             sys.exit(1)
         headless = args.headless == "true"
-        success = cancel_reservation(config["email"], password, args.reservation, headless=headless, skip_email_check=args.skip_email_check)
+        skip_telegram = args.skip_telegram
+        success = cancel_reservation(config["email"], password, args.reservation, headless=headless, skip_email_check=args.skip_email_check, skip_telegram=skip_telegram)
         if success:
             sys.exit(0)
         else:
@@ -1560,12 +1562,14 @@ def main():
     target_park_override = None
     target_date_override = None
     skip_email_check = False
+    skip_telegram = False
     
     if args.command == "book":
         is_headless = args.headless == "true"
         target_park_override = args.park
         target_date_override = args.date
         skip_email_check = args.skip_email_check
+        skip_telegram = args.skip_telegram
         
     success = run_booking_flow(
         config,
@@ -1573,7 +1577,8 @@ def main():
         target_date_override=target_date_override,
         is_headless=is_headless,
         forecast_only=args.forecast_only,
-        skip_email_check=skip_email_check
+        skip_email_check=skip_email_check,
+        skip_telegram=skip_telegram
     )
     if success:
         sys.exit(0)
