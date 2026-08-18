@@ -615,39 +615,230 @@ async def handle_cancel_list_command(interaction: discord.Interaction):
     finally:
         release_operation()
 
-async def handle_selftest_command(interaction: discord.Interaction):
-    if not acquire_operation("Weekly Self-Test"):
-        await interaction.response.send_message(
-            f"⚠️ Another operation is currently running (<b>{CURRENT_OPERATION}</b>).",
-            ephemeral=True
-        )
+def poll_email_verification_for_discord_selftest(transaction_type, transaction_time, max_attempts=6, delay=20):
+    for attempt in range(max_attempts):
+        result = check_recent_email_after_transaction(load_config(), transaction_type, transaction_time)
+        if result.get("status") == "found":
+            return result
+        time.sleep(delay)
+    return {"status": "not_found"}
+
+def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
+    acquired = False
+    for _ in range(6):
+        if acquire_operation("Weekly Self-Test (Discord)"):
+            acquired = True
+            break
+        time.sleep(300)
+        
+    if not acquired:
+        if initial_msg and loop:
+            busy_embed = discord.Embed(
+                title="⚠️ Self-Test Aborted",
+                description="The bot was busy with another operation for over 30 minutes.",
+                color=0xe67e22
+            )
+            asyncio.run_coroutine_threadsafe(initial_msg.edit(embed=busy_embed), loop)
         return
 
-    embed = discord.Embed(
-        title="🧪 Weekly Self-Test Started",
-        description="Running end-to-end automated booking and cancellation validation...",
-        color=0x9b59b6
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=False)
-    msg = await interaction.original_response()
-
-    loop = asyncio.get_running_loop()
-    
-    def run_selftest():
-        import bot as tg_bot
-        tg_bot.config = load_config()
-        tg_bot.run_self_test_flow()
-
+    status_msg = initial_msg
     try:
-        await loop.run_in_executor(None, run_selftest)
-        done_embed = discord.Embed(
-            title="🧪 Self-Test Completed",
-            description="The self-test finished. Check detailed results in the summary card!",
-            color=0x2ecc71
+        import random
+        park = random.choice(["Sibbald Point", "Presqu'ile", "Wasaga Beach"])
+        
+        today = datetime.date.today()
+        # Wednesday is weekday = 2 (Monday is 0)
+        days_ahead = 2 - today.weekday()
+        if days_ahead <= 0:
+            days_ahead += 7
+        target_date = today + datetime.timedelta(days=days_ahead)
+        target_date_str = target_date.strftime("%Y-%m-%d")
+        
+        start_embed = discord.Embed(
+            title="🧪 Weekly Self-Test Started",
+            description=(
+                f"🌲 **Park:** {park}\n"
+                f"📅 **Date:** Wednesday (`{target_date_str}`)\n\n"
+                f"⌛ *Attempting automated booking...*"
+            ),
+            color=0x9b59b6
         )
-        await msg.edit(embed=done_embed)
+        if status_msg and loop:
+            asyncio.run_coroutine_threadsafe(status_msg.edit(embed=start_embed), loop)
+        elif channel and loop:
+            future = asyncio.run_coroutine_threadsafe(channel.send(embed=start_embed), loop)
+            status_msg = future.result(timeout=10)
+            
+        book_transaction_time = datetime.datetime.now(datetime.timezone.utc)
+        
+        # Step 1: Book the park
+        args = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "book", "--park", park, "--date", target_date_str, "--headless", "true", "--skip-email-check"]
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=180)
+        conf_num = None
+        for line in (proc.stdout or "").splitlines():
+            if "CONFIRMATION_NUMBER=" in line:
+                conf_num = line.split("CONFIRMATION_NUMBER=")[1].strip()
+                
+        booking_success = (proc.returncode == 0) and (conf_num is not None)
+        if not booking_success:
+            err_embed = discord.Embed(
+                title="❌ Self-Test Failed at Booking Step",
+                description=f"Automated booking for **{park}** on `{target_date_str}` failed.\nUse `❓ Check Errors` for details.",
+                color=0xe74c3c
+            )
+            if status_msg and loop:
+                asyncio.run_coroutine_threadsafe(status_msg.edit(embed=err_embed), loop)
+            return
+
+        step2_embed = discord.Embed(
+            title="✅ Self-Test: Booking Successful!",
+            description=(
+                f"🌲 **Park:** {park}\n"
+                f"🔑 **Confirmation #:** `{conf_num}`\n\n"
+                f"📥 *Verifying booking confirmation email via IMAP...*"
+            ),
+            color=0x3498db
+        )
+        if status_msg and loop:
+            asyncio.run_coroutine_threadsafe(status_msg.edit(embed=step2_embed), loop)
+
+        # Step 2: Verify booking email
+        book_email_res = poll_email_verification_for_discord_selftest("book", book_transaction_time, max_attempts=6, delay=20)
+        book_email_ok = book_email_res.get("status") == "found"
+        
+        time.sleep(5)
+        cancel_transaction_time = datetime.datetime.now(datetime.timezone.utc)
+        
+        # Step 3: Cancel the booking
+        cancel_args = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "cancel", "--reservation", conf_num, "--headless", "true", "--skip-email-check"]
+        c_res = subprocess.run(cancel_args, capture_output=True, text=True, timeout=90)
+        cancel_success = (c_res.returncode == 0)
+        
+        cancel_email_ok = False
+        cancel_email_res = {}
+        if cancel_success:
+            cancel_email_res = poll_email_verification_for_discord_selftest("cancel", cancel_transaction_time, max_attempts=6, delay=20)
+            cancel_email_ok = cancel_email_res.get("status") == "found"
+
+        # Step 4: Summary Card
+        if booking_success and book_email_ok and cancel_success and cancel_email_ok:
+            overall = "✅ **PASS (100% Verified)**"
+            summary_embed = discord.Embed(
+                title=f"🎉 Weekly Self-Test Summary: {overall}",
+                description=(
+                    f"📍 **Park:** {park}\n"
+                    f"📅 **Date:** Wednesday (`{target_date_str}`)\n"
+                    f"🔑 **Confirmation #:** `{conf_num}`\n\n"
+                    f"📋 **Detailed Verification Steps:**\n"
+                    f"• 🌐 Playwright Booking: ✅ Pass\n"
+                    f"• 📧 Booking Email IMAP: ✅ Verified ({book_email_res.get('time')})\n"
+                    f"• 🌐 Playwright Cancellation: ✅ Pass\n"
+                    f"• 📧 Cancellation Email IMAP: ✅ Verified ({cancel_email_res.get('time')})"
+                ),
+                color=0x2ecc71
+            )
+        else:
+            overall = "⚠️ **PARTIAL / ISSUES DETECTED**"
+            b_str = f"✅ Verified ({book_email_res.get('time')})" if book_email_ok else "⚠️ Not Found"
+            c_str = "✅ Pass" if cancel_success else "❌ Failed"
+            ce_str = f"✅ Verified ({cancel_email_res.get('time')})" if cancel_email_ok else "⚠️ Not Found"
+            summary_embed = discord.Embed(
+                title=f"⚠️ Weekly Self-Test Summary: {overall}",
+                description=(
+                    f"📍 **Park:** {park}\n"
+                    f"📅 **Date:** Wednesday (`{target_date_str}`)\n"
+                    f"🔑 **Confirmation #:** `{conf_num}`\n\n"
+                    f"📋 **Detailed Verification Steps:**\n"
+                    f"• 🌐 Playwright Booking: ✅ Pass\n"
+                    f"• 📧 Booking Email IMAP: {b_str}\n"
+                    f"• 🌐 Playwright Cancellation: {c_str}\n"
+                    f"• 📧 Cancellation Email IMAP: {ce_str}"
+                ),
+                color=0xe67e22
+            )
+        if status_msg and loop:
+            asyncio.run_coroutine_threadsafe(status_msg.edit(embed=summary_embed), loop)
+    except Exception as ex:
+        if status_msg and loop:
+            err_embed = discord.Embed(
+                title="❌ Self-Test Exception",
+                description=str(ex),
+                color=0xe74c3c
+            )
+            asyncio.run_coroutine_threadsafe(status_msg.edit(embed=err_embed), loop)
     finally:
         release_operation()
+
+def get_discord_selftest_schedule(config):
+    import hashlib
+    user_seed = str(config.get("discord_channel_id") or config.get("discord_allowed_user_ids") or "discord_default")
+    hash_int = int(hashlib.md5(user_seed.encode("utf-8")).hexdigest(), 16)
+    total_offset_secs = hash_int % (180 * 60)
+    offset_hours = total_offset_secs // 3600
+    offset_minutes = (total_offset_secs % 3600) // 60
+    target_hour = 6 + offset_hours
+    target_minute = offset_minutes
+    return target_hour, target_minute
+
+def discord_selftest_loop(main_loop):
+    time.sleep(60) # Wait 60 seconds after boot
+    target_hour, target_minute = get_discord_selftest_schedule(load_config())
+    print(f"Scheduled weekly Discord self-test for Thursdays at {target_hour:02d}:{target_minute:02d} (staggered per-user offset).")
+    
+    while True:
+        try:
+            now = datetime.datetime.now()
+            target_hour, target_minute = get_discord_selftest_schedule(load_config())
+            
+            # Check if it is Thursday (weekday = 3) and current time matches or passed target_time
+            if now.weekday() == 3 and (now.hour > target_hour or (now.hour == target_hour and now.minute >= target_minute)):
+                last_date = ""
+                json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_selftest_discord.json")
+                if os.path.exists(json_path):
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        try:
+                            data = json.load(f)
+                            last_date = data.get("last_run_date", "")
+                        except Exception:
+                            pass
+                            
+                today_str = now.strftime("%Y-%m-%d")
+                if last_date != today_str:
+                    print(f"Triggering scheduled Thursday self-test for Discord at {now.strftime('%Y-%m-%d %H:%M:%S')}...")
+                    channel = None
+                    if CHANNEL_ID:
+                        try:
+                            channel = bot.get_channel(int(CHANNEL_ID))
+                        except Exception:
+                            pass
+                    run_discord_self_test_flow(channel=channel, loop=main_loop)
+                    try:
+                        with open(json_path, "w", encoding="utf-8") as f:
+                            json.dump({"last_run_date": today_str, "status": "completed"}, f, indent=4)
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"Error in discord_selftest_loop: {e}")
+        time.sleep(300)
+
+async def handle_selftest_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🧪 Weekly Self-Test Started",
+        description="⏳ Initializing automated booking and cancellation verification flow...",
+        color=0x9b59b6
+    )
+    if not interaction.response.is_done():
+        await interaction.response.send_message(embed=embed, ephemeral=False)
+        msg = await interaction.original_response()
+    else:
+        msg = await interaction.followup.send(embed=embed, ephemeral=False)
+
+    loop = asyncio.get_running_loop()
+    threading.Thread(
+        target=run_discord_self_test_flow,
+        kwargs={"channel": interaction.channel, "initial_msg": msg, "loop": loop},
+        daemon=True
+    ).start()
 
 # -------------------------------------------------------------
 # Slash Commands Registration
@@ -774,6 +965,9 @@ async def on_ready():
                     print(f"Control Dashboard already present in channel #{getattr(channel, 'name', CHANNEL_ID)}.")
         except Exception as ex:
             print(f"Could not auto-post dashboard to channel {CHANNEL_ID}: {ex}")
+
+    # Launch Thursday scheduled self-test loop in background thread
+    threading.Thread(target=discord_selftest_loop, args=(asyncio.get_running_loop(),), daemon=True).start()
 
 def main():
     if not TOKEN:
