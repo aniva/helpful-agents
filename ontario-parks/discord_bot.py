@@ -42,18 +42,57 @@ def is_authorized(user_id):
         return True # Default to open if not explicitly configured
     return str(user_id) in ALLOWED_USER_IDS
 
+CURRENT_OPERATION = None
+CURRENT_THREAD = None
+
 def acquire_operation(op_name):
-    global CURRENT_OPERATION
+    global CURRENT_OPERATION, CURRENT_THREAD
     with op_lock:
         if CURRENT_OPERATION is not None:
             return False
         CURRENT_OPERATION = op_name
+        CURRENT_THREAD = None
         return True
 
+def set_operation_thread(thread):
+    global CURRENT_THREAD
+    with op_lock:
+        CURRENT_THREAD = thread
+
 def release_operation():
-    global CURRENT_OPERATION
+    global CURRENT_OPERATION, CURRENT_THREAD
     with op_lock:
         CURRENT_OPERATION = None
+        CURRENT_THREAD = None
+
+async def send_busy_response(interaction: discord.Interaction, attempted_op):
+    with op_lock:
+        cur_op = CURRENT_OPERATION
+        cur_th = CURRENT_THREAD
+
+    thread_info = ""
+    if cur_th:
+        try:
+            thread_info = f"\n🧵 **Active Thread:** {cur_th.mention} ([Jump to Thread]({cur_th.jump_url}))"
+            # Post notice inside the active thread that another command was attempted
+            blocked_embed = discord.Embed(
+                title="⚠️ Additional Request Intercepted",
+                description=f"User attempted to trigger **{attempted_op}**, but this task is currently running.",
+                color=0xf1c40f
+            )
+            asyncio.create_task(cur_th.send(embed=blocked_embed))
+        except Exception as e:
+            print(f"Could not post busy notice to active thread: {e}")
+
+    busy_embed = discord.Embed(
+        title="⚠️ Operation In Progress",
+        description=f"Another operation is currently running (**{cur_op}**).{thread_info}\nPlease wait for it to complete.",
+        color=0xf1c40f
+    )
+    if not interaction.response.is_done():
+        await interaction.response.send_message(embed=busy_embed, ephemeral=True)
+    else:
+        await interaction.followup.send(embed=busy_embed, ephemeral=True)
 
 # Active reservations cache helpers
 def get_active_reservations():
@@ -300,15 +339,7 @@ def create_dashboard_embed():
 
 async def launch_booking_flow(interaction: discord.Interaction, park_name, date_str):
     if not acquire_operation(f"Booking {park_name}"):
-        busy_embed = discord.Embed(
-            title="⚠️ Operation In Progress",
-            description=f"Another operation is currently running (**{CURRENT_OPERATION}**).\nPlease wait for it to complete.",
-            color=0xf1c40f
-        )
-        if not interaction.response.is_done():
-            await interaction.response.send_message(embed=busy_embed, ephemeral=True)
-        else:
-            await interaction.followup.send(embed=busy_embed, ephemeral=True)
+        await send_busy_response(interaction, f"Booking {park_name}")
         return
 
     embed = discord.Embed(
@@ -330,6 +361,7 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
             name=f"Booking: {park_name} ({date_str})",
             auto_archive_duration=60
         )
+        set_operation_thread(thread)
     except Exception as ex:
         print(f"Could not create thread for booking: {ex}")
 
@@ -481,15 +513,7 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
 
 async def launch_cancellation_flow(interaction: discord.Interaction, conf_num, park_name, date_str):
     if not acquire_operation(f"Cancelling {conf_num}"):
-        busy_embed = discord.Embed(
-            title="⚠️ Operation In Progress",
-            description=f"Another operation is currently running (**{CURRENT_OPERATION}**).\nPlease wait for it to complete.",
-            color=0xf1c40f
-        )
-        if not interaction.response.is_done():
-            await interaction.response.send_message(embed=busy_embed, ephemeral=True)
-        else:
-            await interaction.followup.send(embed=busy_embed, ephemeral=True)
+        await send_busy_response(interaction, f"Cancelling {conf_num}")
         return
 
     embed = discord.Embed(
@@ -543,15 +567,7 @@ async def launch_cancellation_flow(interaction: discord.Interaction, conf_num, p
 
 async def handle_list_command(interaction: discord.Interaction):
     if not acquire_operation("Checking Active Reservations"):
-        busy_embed = discord.Embed(
-            title="⚠️ Operation In Progress",
-            description=f"Another operation is currently running (**{CURRENT_OPERATION}**).\nPlease wait for it to complete.",
-            color=0xf1c40f
-        )
-        if not interaction.response.is_done():
-            await interaction.response.send_message(embed=busy_embed, ephemeral=True)
-        else:
-            await interaction.followup.send(embed=busy_embed, ephemeral=True)
+        await send_busy_response(interaction, "List Active Bookings")
         return
 
     try:
@@ -628,15 +644,7 @@ async def handle_list_command(interaction: discord.Interaction):
 
 async def handle_cancel_list_command(interaction: discord.Interaction):
     if not acquire_operation("Fetching Reservations to Cancel"):
-        busy_embed = discord.Embed(
-            title="⚠️ Operation In Progress",
-            description=f"Another operation is currently running (**{CURRENT_OPERATION}**).\nPlease wait for it to complete.",
-            color=0xf1c40f
-        )
-        if not interaction.response.is_done():
-            await interaction.response.send_message(embed=busy_embed, ephemeral=True)
-        else:
-            await interaction.followup.send(embed=busy_embed, ephemeral=True)
+        await send_busy_response(interaction, "Cancel Menu")
         return
 
     try:
@@ -753,6 +761,7 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
                     loop
                 )
                 thread = future.result(timeout=10)
+                set_operation_thread(thread)
             except Exception as ex:
                 print(f"Could not create thread for self-test: {ex}")
 
@@ -1030,6 +1039,10 @@ def discord_selftest_loop(main_loop):
         time.sleep(300)
 
 async def handle_selftest_command(interaction: discord.Interaction):
+    if not acquire_operation("Weekly Self-Test (Discord)"):
+        await send_busy_response(interaction, "Run Self-Test")
+        return
+
     embed = discord.Embed(
         title="🧪 Weekly Self-Test Started",
         description="⏳ Initializing automated booking and cancellation verification flow...",
