@@ -694,6 +694,7 @@ async def on_message(message: discord.Message):
 
 @bot.event
 async def on_ready():
+    bot.add_view(ControlDashboardView())
     print(f"Logged in as Discord Bot: {bot.user.name} (ID: {bot.user.id})")
     try:
         for g in bot.guilds:
