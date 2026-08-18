@@ -990,6 +990,14 @@ async def cmd_errors(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+@bot.tree.context_menu(name="🌲 Open Parks Menu")
+async def ctx_open_menu(interaction: discord.Interaction, message: discord.Message):
+    if not is_authorized(interaction.user.id):
+        await interaction.response.send_message("⛔ Unauthorized.", ephemeral=True)
+        return
+    embed = create_dashboard_embed()
+    await interaction.response.send_message(embed=embed, view=ControlDashboardView(), ephemeral=True)
+
 # -------------------------------------------------------------
 # Bot Lifecycle Events
 # -------------------------------------------------------------
@@ -1002,7 +1010,7 @@ async def on_message(message: discord.Message):
         return
         
     text = message.content.strip().lower()
-    if text in ["/menu", "!menu", "menu", "help", "!help", "/help", "/start", "start"]:
+    if text in ["/menu", "!menu", "menu", "help", "!help", "/help", "/start", "start", ".", "m", "?", "🌲"]:
         embed = create_dashboard_embed()
         await message.channel.send(embed=embed, view=ControlDashboardView())
     elif text in ["/list", "!list", "list"]:
@@ -1048,11 +1056,20 @@ async def on_ready():
                 async for m in channel.history(limit=10):
                     if m.author.id == bot.user.id and m.embeds and "Ontario Parks Reservation Assistant" in (m.embeds[0].title or ""):
                         found = True
+                        if not m.pinned:
+                            try:
+                                await m.pin()
+                            except Exception:
+                                pass
                         break
                 if not found:
                     embed = create_dashboard_embed()
-                    await channel.send(embed=embed, view=ControlDashboardView())
-                    print(f"Posted Control Dashboard to channel #{getattr(channel, 'name', CHANNEL_ID)} ({CHANNEL_ID})")
+                    msg = await channel.send(embed=embed, view=ControlDashboardView())
+                    try:
+                        await msg.pin()
+                    except Exception:
+                        pass
+                    print(f"Posted & Pinned Control Dashboard to channel #{getattr(channel, 'name', CHANNEL_ID)} ({CHANNEL_ID})")
                 else:
                     print(f"Control Dashboard already present in channel #{getattr(channel, 'name', CHANNEL_ID)}.")
         except Exception as ex:
