@@ -671,14 +671,59 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
             
         book_transaction_time = datetime.datetime.now(datetime.timezone.utc)
         
-        # Step 1: Book the park
+        # Step 1: Book the park with real-time live step updates
         args = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "book", "--park", park, "--date", target_date_str, "--headless", "true", "--skip-email-check"]
-        proc = subprocess.run(args, capture_output=True, text=True, timeout=180)
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
         conf_num = None
-        for line in (proc.stdout or "").splitlines():
-            if "CONFIRMATION_NUMBER=" in line:
-                conf_num = line.split("CONFIRMATION_NUMBER=")[1].strip()
+        for line in iter(proc.stdout.readline, ""):
+            line_str = line.strip()
+            if "[PROGRESS]" in line_str:
+                try:
+                    parts = line_str.split("[PROGRESS]")[1].strip().split("|")
+                    cur_step = "Processing"
+                    cur_desc = "Executing step..."
+                    cur_img = None
+                    for p in parts:
+                        p = p.strip()
+                        if p.startswith("Step:"):
+                            cur_step = p.replace("Step:", "").strip()
+                        elif p.startswith("Desc:"):
+                            cur_desc = p.replace("Desc:", "").strip()
+                        elif p.startswith("Image:"):
+                            cur_img = p.replace("Image:", "").strip()
+                            
+                    step_embed = discord.Embed(
+                        title=f"🧪 Self-Test: Booking {park} ({cur_step})",
+                        description=f"📅 **Date:** Wednesday (`{target_date_str}`)\n📝 **Status:** {cur_desc}",
+                        color=0x3498db
+                    )
+                    file_to_send = None
+                    if cur_img and os.path.exists(cur_img):
+                        file_to_send = discord.File(cur_img, filename="progress.png")
+                        step_embed.set_image(url="attachment://progress.png")
+                        
+                    if status_msg and loop:
+                        asyncio.run_coroutine_threadsafe(
+                            status_msg.edit(embed=step_embed, attachments=[file_to_send] if file_to_send else []),
+                            loop
+                        )
+                except Exception:
+                    pass
+            if "CONFIRMATION_NUMBER=" in line_str:
+                conf_num = line_str.split("CONFIRMATION_NUMBER=")[1].strip()
                 
+        proc.stdout.close()
+        proc.stderr.close()
+        proc.wait()
+        
         booking_success = (proc.returncode == 0) and (conf_num is not None)
         if not booking_success:
             err_embed = discord.Embed(
@@ -687,7 +732,7 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
                 color=0xe74c3c
             )
             if status_msg and loop:
-                asyncio.run_coroutine_threadsafe(status_msg.edit(embed=err_embed), loop)
+                asyncio.run_coroutine_threadsafe(status_msg.edit(embed=err_embed, attachments=[]), loop)
             return
 
         step2_embed = discord.Embed(
