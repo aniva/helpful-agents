@@ -18,7 +18,8 @@ from reserve import (
     clean_park_name,
     check_recent_email_after_transaction,
     PARKS,
-    fetch_weather_forecast
+    fetch_weather_forecast,
+    fetch_park_alerts
 )
 
 # Global variables and locks
@@ -34,7 +35,6 @@ CURRENT_OPERATION = None
 LAST_ERROR = "No errors recorded."
 
 intents = discord.Intents.default()
-intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 def is_authorized(user_id):
@@ -260,10 +260,11 @@ class CancelConfirmationView(discord.ui.View):
     def __init__(self, reservations):
         super().__init__(timeout=180)
         for r in reservations[:5]:
-            conf_num = r.get("conf_number")
-            park = r.get("park_name", "Park")
-            date_str = r.get("date_str", "")
-            label = f"Cancel {park} ({date_str})"[:80]
+            conf_num = r.get("reservation_number") or r.get("conf_number") or ""
+            park = r.get("park") or r.get("park_name") or "Park"
+            date_str = r.get("date") or r.get("date_str") or ""
+            short_park = park.replace(" Provincial Park", "")
+            label = f"Cancel {short_park} ({date_str})"[:80]
             btn = discord.ui.Button(label=label, style=discord.ButtonStyle.danger, emoji="❌", custom_id=f"cancel_{conf_num}")
             btn.callback = self.make_cancel_callback(conf_num, park, date_str)
             self.add_item(btn)
@@ -470,49 +471,111 @@ async def launch_cancellation_flow(interaction: discord.Interaction, conf_num, p
 # -------------------------------------------------------------
 
 async def handle_list_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🔍 Checking Active Reservations...",
+        description="Logging into Ontario Parks account to fetch live bookings...",
+        color=0xf39c12
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    msg = await interaction.original_response()
+
+    loop = asyncio.get_running_loop()
+    
+    def run_live_list():
+        try:
+            res = subprocess.run(
+                [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "list", "--headless", "true"],
+                capture_output=True, text=True, timeout=60
+            )
+            return res.returncode == 0
+        except Exception as ex:
+            print(f"Error running live list: {ex}")
+            return False
+
+    await loop.run_in_executor(None, run_live_list)
+    
     bookings = get_active_reservations()
     if not bookings:
-        embed = discord.Embed(
-            title="📋 Active Ontario Parks Bookings",
-            description="You have no active cached bookings recorded.\nUse the menu to book a daily permit!",
+        empty_embed = discord.Embed(
+            title="ℹ️ No Active Reservations Found",
+            description="You currently have no active vehicle permits booked on your Ontario Parks account.\nUse the menu to book a permit!",
             color=0x95a5a6
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await msg.edit(embed=empty_embed, view=None)
         return
 
     desc_lines = []
     for idx, b in enumerate(bookings, 1):
-        park = b.get("park_name", "Unknown Park")
-        date_str = b.get("date_str", "Unknown Date")
-        conf_num = b.get("conf_number", "N/A")
-        desc_lines.append(f"**{idx}. {park}**\n📅 Date: `{date_str}`\n🔑 Confirmation #: `{conf_num}`\n")
+        park = b.get("park") or b.get("park_name") or "Unknown Park"
+        date_str = b.get("date") or b.get("date_str") or "Unknown Date"
+        conf_num = b.get("reservation_number") or b.get("conf_number") or "N/A"
+        vehicle = b.get("vehicle", "")
+        occupant = b.get("occupant", "")
+        
+        alerts = fetch_park_alerts(park)
+        if alerts:
+            alert_lines = [f"• **{a['type']}:** {a['description'].replace(chr(10), ' ')}" for a in alerts]
+            alerts_text = "\n".join(alert_lines)
+        else:
+            alerts_text = "✅ No active alerts. Safe for swimming! 🏊‍♂️"
+            
+        vehicle_str = f"\n🚗 **Vehicle:** `{vehicle}` ({occupant})" if vehicle else ""
+        desc_lines.append(
+            f"**{idx}. {park}**\n"
+            f"📅 **Date:** `{date_str}`\n"
+            f"🔑 **Confirmation #:** `{conf_num}`{vehicle_str}\n"
+            f"🚨 **Alerts:**\n{alerts_text}\n"
+            f"────────────"
+        )
 
-    embed = discord.Embed(
+    res_embed = discord.Embed(
         title="📋 Active Ontario Parks Bookings",
         description="\n".join(desc_lines),
         color=0x2ecc71
     )
     view = CancelConfirmationView(bookings)
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    await msg.edit(embed=res_embed, view=view)
 
 async def handle_cancel_list_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🔍 Checking Active Reservations...",
+        description="Fetching bookings to cancel...",
+        color=0xf39c12
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    msg = await interaction.original_response()
+
+    loop = asyncio.get_running_loop()
+    
+    def run_live_list():
+        try:
+            res = subprocess.run(
+                [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "list", "--headless", "true"],
+                capture_output=True, text=True, timeout=60
+            )
+            return res.returncode == 0
+        except Exception:
+            return False
+
+    await loop.run_in_executor(None, run_live_list)
+    
     bookings = get_active_reservations()
     if not bookings:
-        embed = discord.Embed(
+        empty_embed = discord.Embed(
             title="❌ Cancel Booking",
             description="No active bookings available to cancel.",
             color=0x95a5a6
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await msg.edit(embed=empty_embed, view=None)
         return
 
-    embed = discord.Embed(
+    cancel_embed = discord.Embed(
         title="❌ Select a Reservation to Cancel",
-        description="Click one of the buttons below to cancel that permit:",
+        description="Click one of the buttons below to cancel that permit directly:",
         color=0xe74c3c
     )
     view = CancelConfirmationView(bookings)
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    await msg.edit(embed=cancel_embed, view=view)
 
 async def handle_selftest_command(interaction: discord.Interaction):
     if not acquire_operation("Weekly Self-Test"):
@@ -611,11 +674,42 @@ async def cmd_errors(interaction: discord.Interaction):
 # -------------------------------------------------------------
 
 @bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+    if not is_authorized(message.author.id):
+        return
+        
+    text = message.content.strip().lower()
+    if text in ["/menu", "!menu", "menu", "help", "!help", "/help", "/start", "start"]:
+        embed = create_dashboard_embed()
+        await message.channel.send(embed=embed, view=ControlDashboardView())
+    elif text in ["/list", "!list", "list"]:
+        bookings = get_active_reservations()
+        if not bookings:
+            embed = discord.Embed(title="📋 Active Bookings", description="No active bookings found.", color=0x95a5a6)
+            await message.channel.send(embed=embed)
+        else:
+            desc_lines = []
+            for idx, b in enumerate(bookings, 1):
+                desc_lines.append(f"**{idx}. {b.get('park_name')}**\n📅 Date: `{b.get('date_str')}`\n🔑 Conf #: `{b.get('conf_number')}`\n")
+            embed = discord.Embed(title="📋 Active Bookings", description="\n".join(desc_lines), color=0x2ecc71)
+            await message.channel.send(embed=embed, view=CancelConfirmationView(bookings))
+    elif text in ["/book", "!book", "book"]:
+        view = ParkButtonsView()
+        embed = discord.Embed(title="🌲 Ontario Parks Booking Wizard", description="Select a park to begin:", color=0x2b82d9)
+        await message.channel.send(embed=embed, view=view)
+
+@bot.event
 async def on_ready():
     print(f"Logged in as Discord Bot: {bot.user.name} (ID: {bot.user.id})")
     try:
+        for g in bot.guilds:
+            bot.tree.copy_global_to(guild=g)
+            await bot.tree.sync(guild=g)
+            print(f"Synced slash commands instantly to guild '{g.name}' (ID: {g.id})")
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} Discord slash commands.")
+        print(f"Synced {len(synced)} Discord slash commands globally.")
     except Exception as e:
         print(f"Failed to sync slash commands: {e}")
 
@@ -623,6 +717,9 @@ async def on_ready():
     if CHANNEL_ID:
         try:
             channel = bot.get_channel(int(CHANNEL_ID))
+            if not channel:
+                channel = await bot.fetch_channel(int(CHANNEL_ID))
+                
             if channel:
                 # Check if dashboard already exists in the last 10 messages
                 found = False
@@ -633,9 +730,11 @@ async def on_ready():
                 if not found:
                     embed = create_dashboard_embed()
                     await channel.send(embed=embed, view=ControlDashboardView())
-                    print(f"Posted Control Dashboard to channel #{channel.name} ({CHANNEL_ID})")
+                    print(f"Posted Control Dashboard to channel #{getattr(channel, 'name', CHANNEL_ID)} ({CHANNEL_ID})")
+                else:
+                    print(f"Control Dashboard already present in channel #{getattr(channel, 'name', CHANNEL_ID)}.")
         except Exception as ex:
-            print(f"Could not auto-post dashboard: {ex}")
+            print(f"Could not auto-post dashboard to channel {CHANNEL_ID}: {ex}")
 
 def main():
     if not TOKEN:

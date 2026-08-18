@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 WorkingDirectory=%h/ontario-parks
 ExecStart=%h/ontario-parks/.venv/bin/python %h/ontario-parks/discord_bot.py
+Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=10
 StandardOutput=journal
