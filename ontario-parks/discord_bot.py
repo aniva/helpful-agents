@@ -471,13 +471,9 @@ async def launch_cancellation_flow(interaction: discord.Interaction, conf_num, p
 # -------------------------------------------------------------
 
 async def handle_list_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🔍 Checking Active Reservations...",
-        description="Logging into Ontario Parks account to fetch live bookings...",
-        color=0xf39c12
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    msg = await interaction.original_response()
+    # Defer immediately to satisfy Discord's 3-second interaction timeout
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
 
     loop = asyncio.get_running_loop()
     
@@ -501,7 +497,7 @@ async def handle_list_command(interaction: discord.Interaction):
             description="You currently have no active vehicle permits booked on your Ontario Parks account.\nUse the menu to book a permit!",
             color=0x95a5a6
         )
-        await msg.edit(embed=empty_embed, view=None)
+        await interaction.followup.send(embed=empty_embed, ephemeral=True)
         return
 
     desc_lines = []
@@ -534,16 +530,12 @@ async def handle_list_command(interaction: discord.Interaction):
         color=0x2ecc71
     )
     view = CancelConfirmationView(bookings)
-    await msg.edit(embed=res_embed, view=view)
+    await interaction.followup.send(embed=res_embed, view=view, ephemeral=True)
 
 async def handle_cancel_list_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🔍 Checking Active Reservations...",
-        description="Fetching bookings to cancel...",
-        color=0xf39c12
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    msg = await interaction.original_response()
+    # Defer immediately to satisfy Discord's 3-second interaction timeout
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
 
     loop = asyncio.get_running_loop()
     
@@ -566,7 +558,7 @@ async def handle_cancel_list_command(interaction: discord.Interaction):
             description="No active bookings available to cancel.",
             color=0x95a5a6
         )
-        await msg.edit(embed=empty_embed, view=None)
+        await interaction.followup.send(embed=empty_embed, ephemeral=True)
         return
 
     cancel_embed = discord.Embed(
@@ -575,7 +567,7 @@ async def handle_cancel_list_command(interaction: discord.Interaction):
         color=0xe74c3c
     )
     view = CancelConfirmationView(bookings)
-    await msg.edit(embed=cancel_embed, view=view)
+    await interaction.followup.send(embed=cancel_embed, view=view, ephemeral=True)
 
 async def handle_selftest_command(interaction: discord.Interaction):
     if not acquire_operation("Weekly Self-Test"):
