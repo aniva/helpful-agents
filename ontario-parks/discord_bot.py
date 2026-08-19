@@ -362,6 +362,16 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
             auto_archive_duration=60
         )
         set_operation_thread(thread)
+        init_thread_embed = discord.Embed(
+            title="🚀 Booking Wizard Initialized",
+            description=(
+                f"🌲 **Park:** {park_name}\n"
+                f"📅 **Date:** `{date_str}`\n\n"
+                f"⏳ *Launching browser automation & navigating to Ontario Parks...*"
+            ),
+            color=0x3498db
+        )
+        await thread.send(embed=init_thread_embed)
     except Exception as ex:
         print(f"Could not create thread for booking: {ex}")
 
@@ -381,6 +391,7 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
         
         proc = subprocess.Popen(
             args,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -420,10 +431,16 @@ async def launch_booking_flow(interaction: discord.Interaction, park_name, date_
                         step_embed.set_image(url="attachment://progress.png")
                         
                     if thread and loop:
-                        asyncio.run_coroutine_threadsafe(
-                            thread.send(embed=step_embed, file=file_to_send if file_to_send else discord.utils.MISSING),
-                            loop
-                        )
+                        if file_to_send:
+                            asyncio.run_coroutine_threadsafe(
+                                thread.send(embed=step_embed, file=file_to_send),
+                                loop
+                            )
+                        else:
+                            asyncio.run_coroutine_threadsafe(
+                                thread.send(embed=step_embed),
+                                loop
+                            )
                 except Exception as ex:
                     print(f"Error parsing progress tag: {ex}")
                     
@@ -536,7 +553,7 @@ async def launch_cancellation_flow(interaction: discord.Interaction, conf_num, p
             "--headless", "true",
             "--skip-telegram"
         ]
-        res = subprocess.run(args, capture_output=True, text=True, timeout=120)
+        res = subprocess.run(args, cwd=os.path.dirname(os.path.abspath(__file__)), capture_output=True, text=True, timeout=120)
         if res.returncode != 0:
             LAST_ERROR = f"Cancellation failed with code {res.returncode}.\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
         return res.returncode == 0
@@ -589,6 +606,7 @@ async def handle_list_command(interaction: discord.Interaction):
             try:
                 res = subprocess.run(
                     [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "list", "--headless", "true"],
+                    cwd=os.path.dirname(os.path.abspath(__file__)),
                     capture_output=True, text=True, timeout=60
                 )
                 return res.returncode == 0
@@ -666,6 +684,7 @@ async def handle_cancel_list_command(interaction: discord.Interaction):
             try:
                 res = subprocess.run(
                     [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "reserve.py"), "list", "--headless", "true"],
+                    cwd=os.path.dirname(os.path.abspath(__file__)),
                     capture_output=True, text=True, timeout=60
                 )
                 return res.returncode == 0
@@ -780,6 +799,7 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
         ]
         proc = subprocess.Popen(
             args,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -816,10 +836,16 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
                         step_embed.set_image(url="attachment://progress.png")
                         
                     if thread and loop:
-                        asyncio.run_coroutine_threadsafe(
-                            thread.send(embed=step_embed, file=file_to_send if file_to_send else discord.utils.MISSING),
-                            loop
-                        )
+                        if file_to_send:
+                            asyncio.run_coroutine_threadsafe(
+                                thread.send(embed=step_embed, file=file_to_send),
+                                loop
+                            )
+                        else:
+                            asyncio.run_coroutine_threadsafe(
+                                thread.send(embed=step_embed),
+                                loop
+                            )
                 except Exception:
                     pass
             if "Captured confirmation number:" in line_str:
@@ -902,7 +928,7 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
             "--skip-email-check",
             "--skip-telegram"
         ]
-        c_res = subprocess.run(cancel_args, capture_output=True, text=True, timeout=90)
+        c_res = subprocess.run(cancel_args, cwd=os.path.dirname(os.path.abspath(__file__)), capture_output=True, text=True, timeout=90)
         cancel_success = (c_res.returncode == 0)
         
         cancel_email_ok = False

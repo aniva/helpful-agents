@@ -1199,25 +1199,44 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         except Exception:
             pass
             
+        dismiss_park_alerts(page)
         dismiss_cookie_consent(page)
         
         print("Opening Day Use section...")
-        day_use_tab = page.locator("#mat-tab-link-1, a:has-text('Day Use'), .mat-tab-link:has-text('Day Use')")
+        day_use_tab = page.locator("a:has-text('Day Use'), button:has-text('Day Use'), [data-category='Day Use'], #mat-tab-link-1, .mat-tab-link:has-text('Day Use')").first
         try:
-            day_use_tab.first.wait_for(state="visible", timeout=10000)
+            day_use_tab.wait_for(state="visible", timeout=12000)
+            day_use_tab.click()
+            time.sleep(2)
         except Exception as e:
-            print("Warning: Day Use tab not visible yet:", e)
-            
-        day_use_tab.first.click()
-        time.sleep(1)
+            print("Warning: Day Use tab click exception:", e)
+            dismiss_park_alerts(page)
+            if day_use_tab.count() > 0:
+                try:
+                    day_use_tab.click(force=True)
+                    time.sleep(2)
+                except Exception:
+                    pass
+                    
+        dismiss_park_alerts(page)
         
         print(f"Searching for park: '{park_search_name}'...")
-        page.fill("#park-autocomplete-input", park_search_name)
-        time.sleep(2)
-        page.press("#park-autocomplete-input", "ArrowDown")
-        time.sleep(1)
-        page.press("#park-autocomplete-input", "Enter")
-        time.sleep(1)
+        park_input = page.locator("#place-search, input#main-search-field, #park-autocomplete-input, input[placeholder*='Search'], input[aria-label*='Search']").first
+        try:
+            park_input.wait_for(state="visible", timeout=15000)
+            park_input.click()
+            park_input.fill(park_search_name)
+            time.sleep(2)
+            first_result = page.locator("div.autocomplete-list-item, div.autocomplete-item, [role='option'], li:has-text('" + park_search_name + "')").first
+            if first_result.count() > 0 and first_result.is_visible():
+                first_result.click()
+            else:
+                page.keyboard.press("ArrowDown")
+                time.sleep(0.5)
+                page.keyboard.press("Enter")
+            time.sleep(1)
+        except Exception as ex:
+            print("Error filling park search:", ex)
         
         print("Selecting date in calendar...")
         page.click("#arrival-date-field")
