@@ -1079,7 +1079,7 @@ def handle_command(command_text):
         
     elif cmd in ["/help", "/start"]:
         reply = (
-            "🤖 <b>AnivaWay Bot Main Menu:</b>\n\n"
+            "🌲 <b>aniva_ontario_parks_bot Main Menu:</b>\n\n"
             "Use the reply menu buttons at the bottom to interact with minimal typing:\n"
             "📋 <b>List Bookings</b> - List active reservations.\n"
             "🌲 <b>Book Daily Permit</b> - Start interactive booking.\n"
@@ -1308,7 +1308,7 @@ def main():
     set_bot_commands(TOKEN)
     
     print(f"Starting Telegram Bot command listener for chat ID: {CHAT_ID}...")
-    send_telegram_message(TOKEN, CHAT_ID, "🤖 AnivaWay Bot is online and listening for commands!", MAIN_REPLY_KEYBOARD)
+    send_telegram_message(TOKEN, CHAT_ID, "🌲 aniva_ontario_parks_bot is online and listening for commands!", MAIN_REPLY_KEYBOARD)
     
     # Start background loop for check-in reminders
     def reminder_loop():
