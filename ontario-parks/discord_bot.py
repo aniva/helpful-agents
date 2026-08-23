@@ -1091,8 +1091,15 @@ async def handle_selftest_command(interaction: discord.Interaction):
 # Slash Commands Registration
 # -------------------------------------------------------------
 
+def check_parks_channel(interaction: discord.Interaction) -> bool:
+    cname = getattr(interaction.channel, 'name', '')
+    return cname in ('aniva_ontario_parks', 'ontario-parks', 'parks')
+
 @bot.tree.command(name="menu", description="Display the Ontario Parks Pull-Out Control Dashboard")
 async def cmd_menu(interaction: discord.Interaction):
+    if not check_parks_channel(interaction):
+        await interaction.response.send_message("❌ Ontario Parks commands are restricted to the **#aniva_ontario_parks** channel.", ephemeral=True)
+        return
     if not is_authorized(interaction.user.id):
         await interaction.response.send_message("⛔ Unauthorized.", ephemeral=True)
         return
@@ -1101,6 +1108,9 @@ async def cmd_menu(interaction: discord.Interaction):
 
 @bot.tree.command(name="list", description="List all active Ontario Parks reservations")
 async def cmd_list(interaction: discord.Interaction):
+    if not check_parks_channel(interaction):
+        await interaction.response.send_message("❌ Ontario Parks commands are restricted to the **#aniva_ontario_parks** channel.", ephemeral=True)
+        return
     if not is_authorized(interaction.user.id):
         await interaction.response.send_message("⛔ Unauthorized.", ephemeral=True)
         return
@@ -1108,6 +1118,9 @@ async def cmd_list(interaction: discord.Interaction):
 
 @bot.tree.command(name="book", description="Open the park booking wizard")
 async def cmd_book(interaction: discord.Interaction):
+    if not check_parks_channel(interaction):
+        await interaction.response.send_message("❌ Ontario Parks commands are restricted to the **#aniva_ontario_parks** channel.", ephemeral=True)
+        return
     if not is_authorized(interaction.user.id):
         await interaction.response.send_message("⛔ Unauthorized.", ephemeral=True)
         return
@@ -1121,6 +1134,9 @@ async def cmd_book(interaction: discord.Interaction):
 
 @bot.tree.command(name="cancel", description="View active bookings with one-click cancel buttons")
 async def cmd_cancel(interaction: discord.Interaction):
+    if not check_parks_channel(interaction):
+        await interaction.response.send_message("❌ Ontario Parks commands are restricted to the **#aniva_ontario_parks** channel.", ephemeral=True)
+        return
     if not is_authorized(interaction.user.id):
         await interaction.response.send_message("⛔ Unauthorized.", ephemeral=True)
         return
@@ -1128,6 +1144,9 @@ async def cmd_cancel(interaction: discord.Interaction):
 
 @bot.tree.command(name="selftest", description="Run the automated weekly self-test verification")
 async def cmd_selftest(interaction: discord.Interaction):
+    if not check_parks_channel(interaction):
+        await interaction.response.send_message("❌ Ontario Parks commands are restricted to the **#aniva_ontario_parks** channel.", ephemeral=True)
+        return
     if not is_authorized(interaction.user.id):
         await interaction.response.send_message("⛔ Unauthorized.", ephemeral=True)
         return
@@ -1135,6 +1154,9 @@ async def cmd_selftest(interaction: discord.Interaction):
 
 @bot.tree.command(name="errors", description="View details of the last failed execution")
 async def cmd_errors(interaction: discord.Interaction):
+    if not check_parks_channel(interaction):
+        await interaction.response.send_message("❌ Ontario Parks commands are restricted to the **#aniva_ontario_parks** channel.", ephemeral=True)
+        return
     if not is_authorized(interaction.user.id):
         await interaction.response.send_message("⛔ Unauthorized.", ephemeral=True)
         return
@@ -1192,9 +1214,7 @@ async def on_ready():
         for g in bot.guilds:
             bot.tree.copy_global_to(guild=g)
             await bot.tree.sync(guild=g)
-            print(f"Synced slash commands instantly to guild '{g.name}' (ID: {g.id})")
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} Discord slash commands globally.")
+            print(f"Synced slash commands cleanly to guild '{g.name}' (ID: {g.id})")
     except Exception as e:
         print(f"Failed to sync slash commands: {e}")
 
