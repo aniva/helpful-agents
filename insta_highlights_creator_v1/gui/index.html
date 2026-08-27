@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insta360 X5 Kitefoil Highlights Creator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/gui/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar controls -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h2>KiteHighlights</h2>
+                <span class="badge">Insta360 X5 Edition</span>
+            </div>
+
+            <section class="section">
+                <h3>1. Media Scanner</h3>
+                <div class="input-group">
+                    <label for="custom-path">SD Card / Custom Path</label>
+                    <div class="flex-row">
+                        <input type="text" id="custom-path" placeholder="/media/user/Insta360 or scan local...">
+                        <button id="btn-scan" class="btn-secondary">Scan</button>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="video-select">Select Raw Video Pair</label>
+                    <select id="video-select">
+                        <option value="">No videos detected yet</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="music-path">Soundtrack Path (MP3/WAV)</label>
+                    <input type="text" id="music-path" placeholder="Path to music file...">
+                </div>
+            </section>
+
+            <section class="section">
+                <h3>2. Highlight Focus</h3>
+                <div class="slider-group">
+                    <div class="flex-row justify-between">
+                        <label for="slide-rider">Myself (Rider)</label>
+                        <span id="val-rider">20%</span>
+                    </div>
+                    <input type="range" id="slide-rider" min="0" max="100" value="20" class="slider">
+                </div>
+
+                <div class="slider-group">
+                    <div class="flex-row justify-between">
+                        <label for="slide-kite">Kite Movements</label>
+                        <span id="val-kite">30%</span>
+                    </div>
+                    <input type="range" id="slide-kite" min="0" max="100" value="30" class="slider">
+                </div>
+
+                <div class="slider-group">
+                    <div class="flex-row justify-between">
+                        <label for="slide-scenery">Scenery & Objects</label>
+                        <span id="val-scenery">50%</span>
+                    </div>
+                    <input type="range" id="slide-scenery" min="0" max="100" value="50" class="slider">
+                </div>
+                <div class="helper-text">Focus values are locked to total 100%</div>
+            </section>
+
+            <section class="section">
+                <h3>3. Format & Audio Mix</h3>
+                <div class="input-group">
+                    <label>Output Format</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="format-type" value="YT" checked>
+                            <span>YouTube (16:9)</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="format-type" value="Instagram">
+                            <span>Instagram (9:16)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="input-row">
+                    <div class="input-group">
+                        <label for="duration">Duration (sec)</label>
+                        <input type="number" id="duration" value="300" min="15" max="1800">
+                    </div>
+                </div>
+
+                <div class="slider-group">
+                    <div class="flex-row justify-between">
+                        <label for="slide-music-vol">Soundtrack Volume</label>
+                        <span id="val-music-vol">70%</span>
+                    </div>
+                    <input type="range" id="slide-music-vol" min="0" max="100" value="70" class="slider">
+                </div>
+
+                <div class="slider-group">
+                    <div class="flex-row justify-between">
+                        <label for="slide-bg-vol">Ambient Volume</label>
+                        <span id="val-bg-vol">30%</span>
+                    </div>
+                    <input type="range" id="slide-bg-vol" min="0" max="100" value="30" class="slider">
+                </div>
+            </section>
+
+            <section class="action-section">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chk-preview" checked>
+                    <label for="chk-preview">Generate low-res 30s preview first</label>
+                </div>
+                <button id="btn-run" class="btn-primary">Generate Video</button>
+            </section>
+        </aside>
+
+        <!-- Main Display -->
+        <main class="main-content">
+            <header class="main-header">
+                <h1>Action Highlight Studio</h1>
+                <div id="connection-status" class="status-indicator">Connected</div>
+            </header>
+
+            <div class="dashboard-grid">
+                <!-- Video Player viewport -->
+                <div class="card video-card">
+                    <div class="card-header">
+                        <h3>Result Preview</h3>
+                    </div>
+                    <div class="video-container" id="video-container">
+                        <div class="video-placeholder" id="video-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="48" height="48">
+                                <path d="M8 5v14l11-7z"/>
+                            </svg>
+                            <p>No video generated yet. Set parameters and click 'Generate Video'.</p>
+                        </div>
+                        <video id="player" controls style="display: none;"></video>
+                    </div>
+                </div>
+
+                <!-- Process Progress and Console -->
+                <div class="card console-card">
+                    <div class="card-header">
+                        <h3>System Status & Logs</h3>
+                        <span id="job-badge" class="badge-status idle">Idle</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progress-bar" style="width: 0%;"></div>
+                        <span class="progress-text" id="progress-text">0%</span>
+                    </div>
+                    <div class="console-output" id="console-output">
+[System Log] Ready. Waiting for inputs...
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="/gui/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+# Tasks
+
+- `[x]` Step 1: Environment Setup
+  - `[x]` Create project directory and write `pyproject.toml`
+  - `[x]` Install `uv` package manager on the system
+- `[x]` Step 2: Core Video Processing Engine (`video_processor.py`)
+  - `[x]` Implement `FisheyeProjector` (circular fisheye to perspective math)
+  - `[x]` Implement visual Horizon Stabilizer (roll locking via sky/water boundary detection)
+  - `[x]` Implement Dual-Lens Tracker (extracting undistorted views, running YOLOv8 detection)
+  - `[x]` Implement Cinematic Path Planner (generating smooth yaw/pitch camera angles and whip pan transitions)
+  - `[x]` Implement Video/Audio Composer (clipping, reframing, and FFmpeg audio mixing)
+- `[x]` Step 3: Local FastAPI Server (`server.py`)
+  - `[x]` Build media scanner endpoints for SD cards
+  - `[x]` Build rendering manager and progress logging
+  - `[x]` Serve static frontend files
+- `[x]` Step 4: CLI Interface (`run.py`)
+  - `[x]` Expose script parameters for headless execution
+- `[x]` Step 5: Visual Dashboard Frontend (`gui/`)
+  - `[x]` Create `index.html` structure
+  - `[x]` Create `style.css` (premium dark glassmorphism theme)
+  - `[x]` Create `app.js` (slider locking, API logs, and preview playback)
+- `[x]` Step 6: Verification & Testing
+  - `[x]` Create verification script `verify_pipeline.py`
+  - `[x]` Run automated pipeline test
+- `[x]` Step 7: WSL Migration & GPU Acceleration
+  - `[x]` Migrate workspace to WSL `/home/me/repos/helpful-agents/insta_highlights_creator`
+  - `[x]` Implement GPU/CUDA-accelerated projection using PyTorch `grid_sample`
+  - `[x]` Implement CPU-GPU hybrid architecture (CPU tracking, GPU rendering) for OOM immunity
+  - `[x]` Support single-file multi-track `.insv` containers automatically
+  - `[x]` Fix cross-device linking rename error by utilizing output directory temp paths
+  - `[x]` Run the highlights generator on the raw 4K clip `VID_20251123_104602_00_014.insv` and output to `/mnt/e/202511_Insta360/014/highlight_4k.mp4` with original ambient audio mixed in.
+- `[x]` Step 8: Closed-Loop Gimbal Stabilization & Scan Optimization
+  - `[x]` Implement real-time closed-loop MIL visual tracking gimbal stabilizer in render loop
+  - `[x]` Implement 1-FPS ground-truth re-syncing to prevent target drift
+  - `[x]` Implement sequential grab optimization (`cap.grab()`) to bypass seek latency
+  - `[x]` Generate a rock-steady 30-second test video at `/mnt/e/202511_Insta360/014/highlight_4k.mp4`
+- `[x]` Step 9: Re-Architecting Tracking and Stabilization (Rock-Steady Gimbal)
+  - `[x]` Move OpenCV MIL tracker to the scan phase (`analyze_video`) running on static viewports
+  - `[x]` Populate timeline with pre-computed absolute yaw/pitch for every frame (30 Hz)
+  - `[x]` Simplify `render_video` to run as an open-loop smoothed projector using the pre-computed angles
+  - `[x]` Verify with automated tests and render a stable 30-second test video
+- `[x]` Step 10: Rock-Steady Stabilization Correction (Architecture One)
+  - `[x]` Apply 20% padding to YOLOv8 boxes before initializing OpenCV tracker
+  - `[x]` Set coordinates to `None` when tracker is lost, and linearly interpolate gaps post-scan
+  - `[x]` Update `render_video` to use $\alpha_{\text{smooth}} = 0.30$ and $\alpha_{\text{roll}} = 0.80$
+  - `[x]` Verify with automated tests and render a new 30-second test video
+- `[x]` Step 11: Gyroflow Telemetry Integration & Lens Alignment Calibration
+  - `[x]` Integrate Gyroflow `.gyroflow` project parsing and metadata extraction
+  - `[x]` Formulate projector rotation basis transformation using permutation matrix P
+  - `[x]` Execute grid search sweep over all 48 signed permutations to align Gyroflow & Projector coordinates
+  - `[x]` Calibrate the mean roll offset (-12 degrees) for perfectly horizontal horizons
+  - `[x]` Generate stabilized highlights and verify using automated tests
+

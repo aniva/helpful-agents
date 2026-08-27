@@ -1,0 +1,7 @@
+
+# Heavy binaries and model weights (>100MB)
+*.so
+*.so.*
+*.pt
+insta_highlights_creator_v2/thirdParty/insta360Sdk/lib/
+insta_highlights_creator_v2/processScratch/
