@@ -465,7 +465,11 @@ function onFrameClicked(clipName, sec, frameIdx) {
 
     if (clipName === inProgressStart.clipName) {
       if (Math.abs(sec - inProgressStart.sec) < 0.5) {
-        selectionText.innerHTML = `⚠️ Clicked the same frame! Please click a <b>different frame</b> to set end.`;
+        // User clicked the exact same frame again: unmark / cancel start!
+        inProgressStart = null;
+        selectionText.innerHTML = "Selection cancelled. Click any frame to set <b>Attempt Start</b>.";
+        btnClearCurrentSelection.style.display = "none";
+        updateCutVisualOverlays();
         return;
       }
       if (sec < inProgressStart.sec) {
@@ -523,6 +527,18 @@ function updateCutVisualOverlays() {
 
     if (inProgressStart && inProgressStart.clipName === cClip && inProgressStart.sec === cSec) {
       card.classList.add("in-progress-start");
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "cut-delete-btn in-progress-cancel-btn";
+      cancelBtn.innerHTML = "&times;";
+      cancelBtn.title = "Cancel Start Frame (Unmark)";
+      cancelBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        inProgressStart = null;
+        selectionText.innerHTML = "Selection cancelled. Click any frame to set <b>Attempt Start</b>.";
+        btnClearCurrentSelection.style.display = "none";
+        updateCutVisualOverlays();
+      });
+      card.appendChild(cancelBtn);
     }
 
     cuts.forEach(cut => {

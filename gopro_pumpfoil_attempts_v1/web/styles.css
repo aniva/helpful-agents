@@ -537,6 +537,16 @@ input[type="text"]:focus, select:focus {
   transform: scale(1.15);
 }
 
+.cut-delete-btn.in-progress-cancel-btn {
+  background: rgba(218, 54, 51, 0.95);
+  box-shadow: 0 0 10px rgba(218, 54, 51, 0.6);
+  z-index: 30;
+}
+.cut-delete-btn.in-progress-cancel-btn:hover {
+  background: #ff4d4d;
+  transform: scale(1.2);
+}
+
 /* Sidebar */
 .cuts-sidebar {
   width: 340px;
