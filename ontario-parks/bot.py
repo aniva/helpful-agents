@@ -127,18 +127,16 @@ def run_self_test_flow():
         park = random.choice(["Sibbald Point", "Presqu'ile", "Wasaga Beach"])
         
         today = datetime.date.today()
-        # Wednesday is weekday = 2 (Monday is 0)
-        days_ahead = 2 - today.weekday()
-        if days_ahead <= 0:
-            days_ahead += 7
-        target_date = today + datetime.timedelta(days=days_ahead)
+        # Always choose a target date 2 days in advance (always valid within Ontario Parks' 5-day window)
+        target_date = today + datetime.timedelta(days=2)
         target_date_str = target_date.strftime("%Y-%m-%d")
+        day_name = target_date.strftime("%A")
         
         send_telegram_message(
             token, chat_id,
             f"🧪 <b>Weekly Self-Test Started:</b>\n"
             f"🌲 <b>Park:</b> {park}\n"
-            f"📅 <b>Date:</b> Wednesday ({target_date_str})\n\n"
+            f"📅 <b>Date:</b> {day_name} ({target_date_str})\n\n"
             f"⌛ <i>Attempting automated booking...</i>"
         )
         
@@ -150,6 +148,8 @@ def run_self_test_flow():
         booking_success = run_subprocess_with_progress(args, f"Self-Test Booking {park}", 360, out_metadata=metadata)
         
         conf_num = metadata.get("conf_number")
+        if conf_num and conf_num.lower() in ["cannot", "unknown", "none"]:
+            conf_num = None
         
         if not booking_success or not conf_num:
             send_telegram_message(

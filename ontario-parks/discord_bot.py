@@ -745,18 +745,16 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
         park = random.choice(["Sibbald Point", "Presqu'ile", "Wasaga Beach"])
         
         today = datetime.date.today()
-        # Wednesday is weekday = 2 (Monday is 0)
-        days_ahead = 2 - today.weekday()
-        if days_ahead <= 0:
-            days_ahead += 7
-        target_date = today + datetime.timedelta(days=days_ahead)
+        # Always choose a target date 2 days in advance (always valid within Ontario Parks' 5-day window)
+        target_date = today + datetime.timedelta(days=2)
         target_date_str = target_date.strftime("%Y-%m-%d")
+        day_name = target_date.strftime("%A")
         
         start_embed = discord.Embed(
             title="🧪 Weekly Self-Test Started",
             description=(
                 f"🌲 **Park:** {park}\n"
-                f"📅 **Date:** Wednesday (`{target_date_str}`)\n\n"
+                f"📅 **Date:** {day_name} (`{target_date_str}`)\n\n"
                 f"⏳ *Testing automated booking, IMAP email check, and cancellation...*\n"
                 f"🧵 *All live step screenshots and debug logs are tracked in the thread below.*"
             ),
@@ -827,7 +825,7 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
                             
                     step_embed = discord.Embed(
                         title=f"🧪 Self-Test: Booking {park} ({cur_step})",
-                        description=f"📅 **Date:** Wednesday (`{target_date_str}`)\n📝 **Status:** {cur_desc}",
+                        description=f"📅 **Date:** {day_name} (`{target_date_str}`)\n📝 **Status:** {cur_desc}",
                         color=0x3498db
                     )
                     file_to_send = None
@@ -849,9 +847,13 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
                 except Exception:
                     pass
             if "Captured confirmation number:" in line_str:
-                conf_num = line_str.split("Captured confirmation number:")[1].strip()
+                raw_conf = line_str.split("Captured confirmation number:")[1].strip()
+                if raw_conf.lower() not in ["cannot", "unknown", "none"]:
+                    conf_num = raw_conf
             elif "CONFIRMATION_NUMBER=" in line_str:
-                conf_num = line_str.split("CONFIRMATION_NUMBER=")[1].strip()
+                raw_conf = line_str.split("CONFIRMATION_NUMBER=")[1].strip()
+                if raw_conf.lower() not in ["cannot", "unknown", "none"]:
+                    conf_num = raw_conf
             elif "INOP26-" in line_str:
                 import re
                 m = re.search(r"INOP26-[A-Za-z0-9]+", line_str)
@@ -862,12 +864,17 @@ def run_discord_self_test_flow(channel=None, initial_msg=None, loop=None):
         proc.stderr.close()
         proc.wait()
         
+        if conf_num and conf_num.lower() in ["cannot", "unknown", "none"]:
+            conf_num = None
+            
         if not conf_num:
             # Fallback check in active_reservations
             for b in get_active_reservations():
                 if b.get("park") == park or b.get("park_name") == park:
-                    conf_num = b.get("reservation_number") or b.get("conf_number")
-                    break
+                    cand = b.get("reservation_number") or b.get("conf_number")
+                    if cand and cand.lower() not in ["cannot", "unknown", "none"]:
+                        conf_num = cand
+                        break
         
         booking_success = (proc.returncode == 0) and (conf_num is not None)
         if not booking_success:

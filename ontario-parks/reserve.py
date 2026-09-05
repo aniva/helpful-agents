@@ -875,12 +875,20 @@ def run_checkout_wizard(page, config, request_approval_callback=None, is_headles
             continue
             
         # 8. Success page checking (Screenshot 11)
-        if "Success!" in page.locator("body").inner_text() or page.locator("text=Success!").count() > 0:
+        body_txt = page.locator("body").inner_text()
+        if "Success!" in body_txt or page.locator("text=Success!").count() > 0 or "INOP" in body_txt:
             print("Wizard complete: Success page reached!")
-            break
+            return True
+            
+        # Check for error / blocking modals
+        if "Cannot Reserve" in body_txt or "not yet allowed" in body_txt:
+            print("Wizard Error: 'Cannot Reserve' modal detected on page!")
+            return False
             
         time.sleep(2)
-    return True
+        
+    print("Wizard Error: Timed out waiting for checkout wizard completion.")
+    return False
 
 def list_reservations(email_user, password, headless=True):
     print("Launching browser to list reservations...")
@@ -1347,9 +1355,21 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
         
         print("Clicking Reserve...")
         page.click("#reserveButton")
-        time.sleep(5)
+        time.sleep(4)
         dismiss_park_alerts(page)
         page.wait_for_load_state("networkidle")
+        
+        # Check for immediate "Cannot Reserve" dialog (e.g. date beyond 5-day booking window)
+        post_reserve_text = page.locator("body").inner_text()
+        if "Cannot Reserve" in post_reserve_text or "not yet allowed" in post_reserve_text:
+            print("Error: 'Cannot Reserve' dialog appeared - booking date window is not yet open!")
+            screenshot_path = os.path.join(os.path.dirname(__file__), f"cannot_reserve_{target_date_str}.png")
+            try:
+                page.screenshot(path=screenshot_path)
+            except Exception:
+                pass
+            browser.close()
+            return False
         
         password = config.get("ontario_parks_password")
         if is_headless and not password:
@@ -1385,7 +1405,7 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
             return False
             
         print("\nScanning page for reservation number...")
-        conf_number = "Unknown"
+        conf_number = None
         page_text = page.locator("body").inner_text()
         
         import re
@@ -1394,12 +1414,17 @@ def run_booking_flow(config, target_park_override=None, target_date_override=Non
             conf_number = match.group(0)
             print(f"Captured confirmation number: {conf_number}")
         else:
-            match_any = re.search(r"Reservation\s*(?:Number|#)?\s*:?\s*([A-Z0-9\-]{5,})", page_text, re.IGNORECASE)
+            match_any = re.search(r"Reservation\s*(?:Number|#)?\s*:?\s*(INOP[A-Z0-9\-]+|OP-[A-Z0-9\-]+|[A-Z0-9]{8,})", page_text, re.IGNORECASE)
             if match_any:
                 temp_num = match_any.group(1).strip()
-                if temp_num.lower() not in ["support", "details", "information", "reservations", "account"]:
+                if temp_num.lower() not in ["cannot", "support", "details", "information", "reservations", "account", "checkout"]:
                     conf_number = temp_num
                     print(f"Captured confirmation number: {conf_number}")
+        
+        if not conf_number:
+            print("Error: Could not capture a valid confirmation number on final page!")
+            browser.close()
+            return False
                 
         screenshot_name = f"confirmation_{target_date_str}_{conf_number.replace('-', '_')}.png"
         screenshot_path = os.path.join(os.path.dirname(__file__), screenshot_name)
