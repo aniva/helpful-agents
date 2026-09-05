@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GoPro Pump Foil Attempts Extractor v1</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top Configuration Header -->
+  <header class="app-header">
+    <div class="header-brand">
+      <span class="brand-icon">🏄</span>
+      <div>
+        <h1>GoPro Pump Foil Extractor <span class="version-tag">v1.0</span></h1>
+        <div class="brand-sub">Auto-detect &bull; Vertical Single-Column Timeline &bull; Instant Multi-Cut</div>
+      </div>
+    </div>
+
+    <div class="config-bar">
+      <div class="config-field">
+        <label>GoPro SD Source:</label>
+        <div class="input-with-action">
+          <input type="text" id="srcDir" placeholder="e.g. F:\DCIM\100GOPRO">
+          <button id="btnDetectSD" title="Auto-detect GoPro SD card">🔍 Detect SD</button>
+        </div>
+      </div>
+
+      <div class="config-field">
+        <label>Destination Folder:</label>
+        <input type="text" id="destDir" placeholder="e.g. E:\20260904_PumpFoil">
+      </div>
+
+      <div class="config-field" style="max-width: 140px;">
+        <label>Sample Interval:</label>
+        <select id="selInterval">
+          <option value="1">1.0 sec (Ultra-fine)</option>
+          <option value="2">2.0 sec (Detailed)</option>
+          <option value="4" selected>4.0 sec (Default)</option>
+          <option value="6">6.0 sec (Fast Scan)</option>
+        </select>
+      </div>
+
+      <div class="config-actions">
+        <button class="btn primary" id="btnScan">⚡ Load Timeline</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Sticky Action Toolbar -->
+  <nav class="sticky-toolbar">
+    <div class="toolbar-left">
+      <div class="selection-status-box" id="selectionStatus">
+        <span class="pulse-dot"></span>
+        <span id="selectionText">Click any frame to set <b>Attempt Start</b></span>
+      </div>
+      <button class="btn secondary sm" id="btnClearCurrentSelection" style="display: none;">Cancel Selection</button>
+
+      <!-- Frame Size Slider -->
+      <div class="size-control-box">
+        <label>Zoom / Frame Size:</label>
+        <div class="size-slider-wrap">
+          <button class="btn-sm-icon" id="btnSizeDec" title="Make frames smaller">&minus;</button>
+          <input type="range" id="sliderSize" min="280" max="920" value="540" step="20">
+          <button class="btn-sm-icon" id="btnSizeInc" title="Make frames bigger">&plus;</button>
+          <span class="size-label" id="lblSize">540px</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="toolbar-center">
+      <div class="stats-pill">
+        <span>🎬 <b id="statClipCount">0</b> clips</span>
+        <span>⏱️ <b id="statDuration">0m</b></span>
+        <span>✂️ <b id="statCutCount">0</b> attempts</span>
+      </div>
+    </div>
+
+    <div class="toolbar-right">
+      <span class="sync-indicator" id="syncStatus">🟢 Auto-saved</span>
+      <button class="btn outline" id="btnToggleSidebar">📋 Cuts List (<span id="btnCutCount">0</span>)</button>
+      <button class="btn primary" id="btnCutOnly">✂️ Cut Attempts</button>
+      <button class="btn success" id="btnCutAndStitch">🎬 Cut &amp; Stitch Highlights</button>
+      <button class="btn secondary" id="btnOpenFolder" title="Open Destination in Windows Explorer">📁 Output</button>
+    </div>
+  </nav>
+
+  <!-- Main Content Layout -->
+  <main class="main-container">
+    
+    <!-- Continuous Vertical Timeline (Single Column) -->
+    <section class="timeline-container" id="timelineContainer">
+      <div class="empty-placeholder" id="emptyPlaceholder">
+        <div class="placeholder-icon">🎞️</div>
+        <h2>No session loaded yet</h2>
+        <p>Verify your GoPro SD card path above and click <b>Load Timeline</b>.</p>
+        <button class="btn primary" onclick="document.getElementById('btnScan').click()">⚡ Scan GoPro Footage Now</button>
+      </div>
+      <div class="vertical-timeline single-column" id="verticalTimeline"></div>
+    </section>
+
+    <!-- Floating / Docked Cuts Sidebar -->
+    <aside class="cuts-sidebar" id="cutsSidebar">
+      <div class="sidebar-header">
+        <h3>Marked Attempts (<span id="sidebarCount">0</span>)</h3>
+        <button class="btn-icon" id="btnCloseSidebar">&times;</button>
+      </div>
+      <div class="sidebar-info-note">
+        💡 Every mouse selection is saved automatically to <code>cuts.txt</code>.
+      </div>
+      <div class="cuts-list-scroll" id="cutsListScroll">
+        <div class="empty-cuts-hint">No attempts marked yet. Click a start frame then end frame on the timeline to create an attempt.</div>
+      </div>
+      <div class="sidebar-footer">
+        <button class="btn danger full-width" id="btnClearAllCuts">Clear All Cuts</button>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- Hover Magnifier Box -->
+  <div class="hover-magnifier" id="hoverMagnifier">
+    <img id="magnifierImg" src="" alt="preview">
+    <div class="magnifier-badge">
+      <span id="magnifierClip">Clip</span>
+      <span id="magnifierTime">00:00</span>
+    </div>
+  </div>
+
+  <!-- Processing Modal / Real Percentage Progress Dialog -->
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal-card">
+      <div class="spinner" id="modalSpinner"></div>
+      <div class="progress-percent" id="modalPercent">0%</div>
+      <h2 id="modalTitle">Processing Video...</h2>
+      <p id="modalMsg">Initializing...</p>
+      
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="modalProgressFill" style="width: 0%;"></div>
+      </div>
+      
+      <div class="progress-details" id="modalDetails">Reading clip metadata...</div>
+
+      <div class="modal-actions" id="modalActions" style="display: none;">
+        <button class="btn primary" id="modalCloseBtn">Done</button>
+        <button class="btn secondary" id="modalOpenBtn">📁 Open Output Folder</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
