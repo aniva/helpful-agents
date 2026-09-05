@@ -286,7 +286,15 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
                 try:
                     os.makedirs(folder, exist_ok=True)
                     if is_windows():
-                        os.startfile(folder)
+                        # Launch via cmd.exe start with local drive cwd to avoid UNC blocking
+                        try:
+                            subprocess.Popen(
+                                ["cmd.exe", "/c", "start", "", folder],
+                                cwd=os.environ.get("USERPROFILE", "C:\\"),
+                                shell=False
+                            )
+                        except Exception:
+                            os.startfile(folder)
                     else:
                         # Translate WSL path to Windows path for explorer.exe
                         win_path = folder
@@ -296,7 +304,7 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
                                 drive = parts[2].upper()
                                 rest = "\\".join(parts[3:])
                                 win_path = f"{drive}:\\{rest}"
-                        subprocess.run(["explorer.exe", win_path])
+                        subprocess.Popen(["explorer.exe", win_path])
                     self.send_json({"status": "ok", "path": folder, "opened": True})
                     return
                 except Exception as e:
