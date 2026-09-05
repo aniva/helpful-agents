@@ -13,7 +13,7 @@
     <div class="header-brand">
       <span class="brand-icon">🏄</span>
       <div>
-        <h1>GoPro Pump Foil Extractor <span class="version-tag">v1.7</span></h1>
+        <h1>GoPro Pump Foil Extractor <span class="version-tag">v1.8</span></h1>
         <div class="brand-sub">Auto-detect &bull; Vertical Single-Column Timeline &bull; Instant Multi-Cut</div>
       </div>
     </div>
@@ -87,6 +87,7 @@
         <span>🎬 <b id="statClipCount">0</b> clips</span>
         <span>⏱️ <b id="statDuration">0m</b></span>
         <span>✂️ <b id="statCutCount">0</b> attempts</span>
+        <span class="hw-bench-pill" id="hwBenchPill" title="Hardware Acceleration">⚡ Calibrating GPU...</span>
       </div>
     </div>
 
@@ -176,6 +177,7 @@
   <!-- Processing Modal / Real Percentage Progress Dialog -->
   <div class="modal-backdrop" id="modalBackdrop">
     <div class="modal-card">
+      <button class="modal-close-x" id="modalBackdropCloseX" title="Cancel">&times;</button>
       <div class="spinner" id="modalSpinner"></div>
       <div class="progress-percent" id="modalPercent">0%</div>
       <h2 id="modalTitle">Processing Video...</h2>
@@ -187,7 +189,11 @@
       
       <div class="progress-details" id="modalDetails">Reading clip metadata...</div>
 
-      <div class="modal-actions" id="modalActions" style="display: none;">
+      <div class="modal-active-actions" id="modalActiveActions" style="margin-top: 18px;">
+        <button class="btn secondary danger" id="modalCancelBtn">🛑 Cancel Processing</button>
+      </div>
+
+      <div class="modal-actions" id="modalActions" style="display: none; margin-top: 18px;">
         <button class="btn primary" id="modalCloseBtn">Done</button>
       </div>
     </div>

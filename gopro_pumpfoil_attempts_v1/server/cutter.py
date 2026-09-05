@@ -2,6 +2,22 @@ import os
 import subprocess
 import json
 
+# Global process tracking for graceful cancellation
+current_process = None
+is_cancelled = False
+
+def cancel_active_process():
+    """Cancels any running ffmpeg subprocess cleanly."""
+    global current_process, is_cancelled
+    is_cancelled = True
+    if current_process:
+        try:
+            current_process.terminate()
+            current_process.kill()
+        except Exception:
+            pass
+        current_process = None
+
 def check_nvenc_available():
     try:
         res = subprocess.run(["ffmpeg", "-encoders"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -21,43 +37,49 @@ def parse_time_str(t_str):
         pass
     return 0.0
 
-def cut_attempts(source_dir, dest_dir, cuts, progress_callback=None):
+def cut_attempts(source_dir, dest_dir, cuts, progress_callback=None, benchmark=None):
     """
     Renders each marked attempt into dest_dir/attempts/ using GPU NVENC (or CPU fallback)
     with clean IDR keyframes starting at frame 0.
+    Reports smooth frame-by-frame progress and estimated time remaining.
     """
+    global current_process, is_cancelled
+    is_cancelled = False
+    current_process = None
+
     attempts_dir = os.path.join(dest_dir, "attempts")
     os.makedirs(attempts_dir, exist_ok=True)
 
     has_nvenc = check_nvenc_available()
+    speed_factor = (benchmark.get("speed", 0.8) if benchmark else 0.8) if has_nvenc else 0.25
+    fps_est = (benchmark.get("fps", 48.0) if benchmark else 48.0) if has_nvenc else 15.0
+
+    valid_cuts = []
+    for c in cuts:
+        s = parse_time_str(c.get("startTime", "00:00"))
+        e = parse_time_str(c.get("stopTime", "00:00"))
+        if e > s:
+            valid_cuts.append((c, s, e, e - s))
+
+    total_cut_duration = sum(d for _, _, _, d in valid_cuts)
+    elapsed_total_seconds_done = 0.0
     results = []
 
-    for idx, cut in enumerate(cuts, 1):
+    for idx, (cut, s_sec, e_sec, clip_dur) in enumerate(valid_cuts, 1):
+        if is_cancelled:
+            results.append({"status": "cancelled", "label": cut.get("label")})
+            break
+
         clip_name = cut.get("clipName")
         start_time = cut.get("startTime", "00:00")
         stop_time = cut.get("stopTime", "00:00")
         label = cut.get("label", f"Attempt_{idx}").strip().replace(" ", "_")
-
-        s_sec = parse_time_str(start_time)
-        e_sec = parse_time_str(stop_time)
-        if e_sec <= s_sec:
-            print(f"Skipping invalid attempt {label}: stopTime ({stop_time}) <= startTime ({start_time})")
-            results.append({
-                "status": "error",
-                "label": label,
-                "file": clip_name,
-                "error": f"Invalid duration: {start_time} to {stop_time} (must be > 0s)"
-            })
-            continue
 
         in_file = os.path.join(source_dir, clip_name)
         clean_start = start_time.replace(":", "-")
         clean_stop = stop_time.replace(":", "-")
         out_name = f"{label}_{clip_name}_{clean_start}-{clean_stop}.mp4"
         out_file = os.path.join(attempts_dir, out_name)
-
-        if progress_callback:
-            progress_callback(idx, len(cuts), f"Rendering {label} ({clean_start} - {clean_stop})...")
 
         if has_nvenc:
             cmd = [
@@ -70,10 +92,10 @@ def cut_attempts(source_dir, dest_dir, cuts, progress_callback=None):
                 "-preset", "p4",
                 "-cq", "19",
                 "-c:a", "copy",
+                "-progress", "pipe:1",
                 out_file
             ]
         else:
-            # CPU fallback
             cmd = [
                 "ffmpeg", "-y",
                 "-ss", start_time,
@@ -83,14 +105,79 @@ def cut_attempts(source_dir, dest_dir, cuts, progress_callback=None):
                 "-crf", "20",
                 "-preset", "veryfast",
                 "-c:a", "copy",
+                "-progress", "pipe:1",
                 out_file
             ]
 
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        if res.returncode == 0:
+        try:
+            import time
+            current_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1
+            )
+        except Exception as e:
+            results.append({"status": "error", "file": out_name, "error": str(e)})
+            continue
+
+        clip_rendered_sec = 0.0
+        last_report_time = 0.0
+
+        if current_process.stdout:
+            for line in current_process.stdout:
+                if is_cancelled:
+                    break
+                line = line.strip()
+                if line.startswith("out_time_ms="):
+                    try:
+                        ms = int(line.split("=")[1])
+                        clip_rendered_sec = max(0.0, ms / 1000000.0)
+                    except Exception:
+                        pass
+                elif line.startswith("progress=") and line == "progress=end":
+                    clip_rendered_sec = clip_dur
+
+                now = time.time()
+                if now - last_report_time >= 0.1 and progress_callback:
+                    last_report_time = now
+                    current_overall_rendered = elapsed_total_seconds_done + min(clip_dur, clip_rendered_sec)
+                    overall_pct = (current_overall_rendered / max(0.1, total_cut_duration)) if total_cut_duration > 0 else 0
+                    
+                    rem_video_sec = max(0.0, total_cut_duration - current_overall_rendered)
+                    eta_sec = int(rem_video_sec / max(0.1, speed_factor))
+                    eta_str = f"{eta_sec}s remaining" if eta_sec < 60 else f"{eta_sec // 60}m {eta_sec % 60}s remaining"
+
+                    current_clip_pct = int(min(100, (clip_rendered_sec / max(0.1, clip_dur)) * 100))
+                    msg = f"Cutting Attempt {idx}/{len(valid_cuts)}: {label} ({current_clip_pct}%) &bull; ETA: {eta_str}"
+                    details = f"Rendering {clean_start} to {clean_stop} ({clip_dur:.1f}s) via {'GPU NVENC' if has_nvenc else 'CPU'} @ {fps_est:.0f} fps"
+                    
+                    progress_callback(
+                        idx=idx,
+                        total=len(valid_cuts),
+                        pct=int(overall_pct * 100),
+                        msg=msg,
+                        details=details,
+                        eta=eta_str
+                    )
+
+        current_process.wait()
+        returncode = current_process.returncode
+        current_process = None
+
+        if is_cancelled:
+            if os.path.exists(out_file):
+                try: os.remove(out_file)
+                except Exception: pass
+            results.append({"status": "cancelled", "label": label})
+            break
+
+        if returncode == 0:
+            elapsed_total_seconds_done += clip_dur
             results.append({"status": "success", "file": out_name, "path": out_file, "label": label})
         else:
-            results.append({"status": "error", "file": out_name, "error": res.stderr[-200:]})
+            results.append({"status": "error", "file": out_name, "error": f"ffmpeg exit code {returncode}"})
 
     return results
 

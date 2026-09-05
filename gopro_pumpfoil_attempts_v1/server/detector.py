@@ -275,6 +275,47 @@ def delete_sd_cuts(source_dir):
             pass
     return True
 
+def benchmark_hardware():
+    """
+    Benchmarks encoding speed for 1 second of 4K 60fps video.
+    Returns hardware type, measured FPS, and speed factor.
+    """
+    import subprocess
+    import time
+    from cutter import check_nvenc_available
+
+    has_nvenc = check_nvenc_available()
+    codec = "hevc_nvenc" if has_nvenc else "libx265"
+    preset = ["-preset", "p4", "-cq", "19"] if has_nvenc else ["-preset", "veryfast", "-crf", "20"]
+
+    t0 = time.time()
+    cmd = [
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=1:size=3840x2160:rate=60",
+        "-c:v", codec, *preset, "-f", "null", "-"
+    ]
+    try:
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        elapsed = max(0.01, time.time() - t0)
+        fps = 60.0 / elapsed
+        speed = fps / 60.0
+        return {
+            "hardware": "GPU NVENC (NVIDIA CUDA)" if has_nvenc else "CPU (libx265)",
+            "codec": codec,
+            "hasNvenc": has_nvenc,
+            "fps": round(fps, 1),
+            "speed": round(speed, 2),
+            "benchmarkSeconds": round(elapsed, 2)
+        }
+    except Exception as e:
+        return {
+            "hardware": "GPU NVENC" if has_nvenc else "CPU",
+            "codec": codec,
+            "hasNvenc": has_nvenc,
+            "fps": 45.0 if has_nvenc else 15.0,
+            "speed": 0.75 if has_nvenc else 0.25,
+            "error": str(e)
+        }
+
 if __name__ == "__main__":
     print("Detected GoPro paths:", detect_gopro())
     print("Suggested Destination:", suggest_destination())

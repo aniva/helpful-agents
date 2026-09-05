@@ -10,15 +10,20 @@ import subprocess
 
 from detector import (
     detect_gopro, suggest_destination, to_local_path, is_windows,
-    load_sd_metadata, save_sd_metadata, mirror_cuts_to_sd, load_sd_cuts, delete_sd_cuts
+    load_sd_metadata, save_sd_metadata, mirror_cuts_to_sd, load_sd_cuts, delete_sd_cuts,
+    benchmark_hardware
 )
 from extractor import scan_and_extract_timeline
-from cutter import cut_attempts, sync_cuts_file
+from cutter import cut_attempts, sync_cuts_file, cancel_active_process
+import cutter
 from stitcher import stitch_highlights
 
 DEFAULT_PORT = 8765
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASE_DIR, "web")
+
+# Hardware benchmark cache
+cached_benchmark = None
 
 # Live progress state tracked across operations
 progress_state = {
@@ -26,15 +31,19 @@ progress_state = {
     "percent": 0,
     "title": "",
     "message": "",
-    "details": ""
+    "details": "",
+    "eta": "",
+    "cancelled": False
 }
 
-def report_progress(percent, message=None, details=None, title=None, active=True):
+def report_progress(percent, message=None, details=None, title=None, active=True, eta=None, cancelled=False):
     progress_state["active"] = active
     progress_state["percent"] = min(100, max(0, int(percent)))
+    progress_state["cancelled"] = cancelled
     if title: progress_state["title"] = title
     if message: progress_state["message"] = message
     if details: progress_state["details"] = details
+    if eta is not None: progress_state["eta"] = eta
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
@@ -52,6 +61,7 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):
+        global cached_benchmark
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
@@ -60,12 +70,17 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(progress_state)
             return
 
+        elif path == "/api/benchmark":
+            if not cached_benchmark:
+                cached_benchmark = benchmark_hardware()
+            self.send_json(cached_benchmark)
+            return
+
         elif path == "/api/detect_sd":
             detected = detect_gopro()
             suggested_src = detected[0] if detected else ""
             suggested_dst = suggest_destination(suggested_src)
             sd_meta = load_sd_metadata(suggested_src) if suggested_src else None
-            # Always suggest GOPRO_<recording date>_<first recording start time>
             self.send_json({
                 "detectedSources": detected,
                 "suggestedSource": suggested_src,
@@ -104,7 +119,6 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
                     except Exception:
                         pass
             elif src_dir:
-                # Try SD card cuts
                 cuts = load_sd_cuts(src_dir)
             self.send_json({"cuts": cuts})
             return
@@ -112,6 +126,7 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        global cached_benchmark
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         content_len = int(self.headers.get('Content-Length', 0))
@@ -121,7 +136,13 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             data = {}
 
-        if path == "/api/check_session":
+        if path == "/api/cancel_process":
+            cancel_active_process()
+            report_progress(0, "Cancelled", "Operation was cancelled by user.", active=False, cancelled=True)
+            self.send_json({"status": "cancelled"})
+            return
+
+        elif path == "/api/check_session":
             src = to_local_path(data.get("sourceDir", ""))
             dst = to_local_path(data.get("destDir", ""))
             interval = float(data.get("interval", 4.0))
@@ -154,7 +175,6 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             src = to_local_path(data.get("sourceDir", ""))
             dst = to_local_path(data.get("destDir", ""))
             delete_sd_cuts(src)
-            # Also clear destination cuts.txt if requested
             if dst and os.path.exists(dst):
                 cuts_f = os.path.join(dst, "cuts.txt")
                 if os.path.exists(cuts_f):
@@ -192,10 +212,8 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             )
             report_progress(100, "Done!", "Timeline ready.", active=False)
             
-            # Save metadata to SD card linking to this destination
             save_sd_metadata(src, dst)
 
-            # Check existing cuts (destination state first, fallback to SD card)
             state_file = os.path.join(dst, "session_state.json")
             existing_cuts = []
             source_of_cuts = None
@@ -243,6 +261,9 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             dst = to_local_path(data.get("destDir", ""))
             cuts = data.get("cuts", [])
 
+            if not cached_benchmark:
+                cached_benchmark = benchmark_hardware()
+
             sync_cuts_file(dst, cuts, source_dir=src)
 
             cut_results = []
@@ -251,23 +272,30 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             if action in ["cut", "cut_and_stitch"]:
                 report_progress(0, "Starting cut...", "Preparing GPU NVENC...", title="Cutting Attempts", active=True)
                 
-                def cut_prog(idx, total, msg):
-                    pct = int(((idx - 1) / max(1, total)) * (60 if action == "cut_and_stitch" else 100))
-                    report_progress(pct, f"Cutting Attempt {idx}/{total}", msg)
+                def cut_prog(idx, total, pct, msg, details, eta=""):
+                    overall_pct = int(pct * 0.6) if action == "cut_and_stitch" else pct
+                    report_progress(overall_pct, msg, details, eta=eta, title="Cutting Attempts")
 
-                cut_results = cut_attempts(src, dst, cuts, progress_callback=cut_prog)
+                cut_results = cut_attempts(src, dst, cuts, progress_callback=cut_prog, benchmark=cached_benchmark)
+
+            if cutter.is_cancelled:
+                self.send_json({"status": "cancelled", "action": action})
+                return
 
             if action in ["stitch", "cut_and_stitch"]:
-                report_progress(60 if action == "cut_and_stitch" else 0, "Applying transitions...", "Dip-fades in progress...", title="Stitching Highlights", active=True)
+                base_pct = 60 if action == "cut_and_stitch" else 0
+                report_progress(base_pct, "Applying transitions...", "Dip-fades in progress...", title="Stitching Highlights", active=True)
                 attempt_files = [r["path"] for r in cut_results if r.get("status") == "success"] if cut_results else None
 
-                def stitch_prog(idx, total, msg):
-                    base_pct = 60 if action == "cut_and_stitch" else 0
-                    span = 35 if action == "cut_and_stitch" else 85
-                    pct = base_pct + int((idx / max(1, total)) * span)
-                    report_progress(pct, f"Transition {idx}/{total}", msg)
+                def stitch_prog(idx, total, pct, msg, details, eta=""):
+                    overall_pct = base_pct + int(pct * 0.4) if action == "cut_and_stitch" else pct
+                    report_progress(overall_pct, msg, details, eta=eta, title="Stitching Highlights")
 
-                stitch_result = stitch_highlights(dst, attempt_files=attempt_files, progress_callback=stitch_prog)
+                stitch_result = stitch_highlights(dst, attempt_files=attempt_files, progress_callback=stitch_prog, benchmark=cached_benchmark)
+
+            if cutter.is_cancelled:
+                self.send_json({"status": "cancelled", "action": action})
+                return
 
             report_progress(100, "Finished!", "All tasks completed.", active=False)
 

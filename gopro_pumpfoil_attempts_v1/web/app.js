@@ -45,7 +45,11 @@ const modalMsg = document.getElementById("modalMsg");
 const modalProgressFill = document.getElementById("modalProgressFill");
 const modalDetails = document.getElementById("modalDetails");
 const modalActions = document.getElementById("modalActions");
+const modalActiveActions = document.getElementById("modalActiveActions");
 const modalCloseBtn = document.getElementById("modalCloseBtn");
+const modalCancelBtn = document.getElementById("modalCancelBtn");
+const modalBackdropCloseX = document.getElementById("modalBackdropCloseX");
+const hwBenchPill = document.getElementById("hwBenchPill");
 
 // New Pre-Scan Dialogs & SD Banner DOM
 const sdBanner = document.getElementById("sdBanner");
@@ -108,11 +112,32 @@ window.addEventListener("DOMContentLoaded", async () => {
     updateFrameSize(savedSize);
   }
 
+  // Load hardware benchmark in background
+  loadHardwareBenchmark();
+
   // Detect GoPro drives if empty, but do NOT automatically pop up scans on load
   if (!srcDirInput.value) {
     await autoDetectSD();
   }
 });
+
+async function loadHardwareBenchmark() {
+  try {
+    const res = await fetch("/api/benchmark");
+    const data = await res.json();
+    if (data && hwBenchPill) {
+      if (data.hasNvenc) {
+        hwBenchPill.innerHTML = `⚡ <b>GPU NVENC</b> &bull; ${data.fps} fps (${data.speed}x)`;
+        hwBenchPill.title = `NVIDIA GPU Hardware Acceleration Active: ${data.fps} fps encoding speed`;
+      } else {
+        hwBenchPill.innerHTML = `🖥️ CPU &bull; ${data.fps} fps`;
+        hwBenchPill.title = `CPU Encoding Fallback`;
+      }
+    }
+  } catch (e) {
+    if (hwBenchPill) hwBenchPill.textContent = "⚡ GPU Ready";
+  }
+}
 
 // Frame Size Controls
 function updateFrameSize(val) {
@@ -159,14 +184,18 @@ function startProgressPolling() {
       const res = await fetch("/api/progress");
       const data = await res.json();
       if (data) {
+        if (data.cancelled) {
+          stopProgressPolling();
+          return;
+        }
         modalPercent.textContent = `${data.percent || 0}%`;
         modalProgressFill.style.width = `${data.percent || 0}%`;
         if (data.title) modalTitle.textContent = data.title;
         if (data.message) modalMsg.textContent = data.message;
-        if (data.details) modalDetails.textContent = data.details;
+        if (data.details) modalDetails.innerHTML = data.details;
       }
     } catch (e) {}
-  }, 250);
+  }, 200);
 }
 
 function stopProgressPolling() {
@@ -676,6 +705,38 @@ btnCloseSidebar.addEventListener("click", () => cutsSidebar.classList.add("colla
 btnCutOnly.addEventListener("click", () => runProcessing("cut"));
 btnCutAndStitch.addEventListener("click", () => runProcessing("cut_and_stitch"));
 
+let isProcessingRunning = false;
+
+async function cancelActiveProcessing() {
+  try {
+    modalMsg.textContent = "Cancelling ffmpeg encoding...";
+    modalDetails.textContent = "Stopping subprocesses cleanly...";
+    await fetch("/api/cancel_process", { method: "POST" });
+  } catch (e) {
+    console.error("Cancel failed:", e);
+  }
+  stopProgressPolling();
+  isProcessingRunning = false;
+  hideModal();
+  updateCutVisualOverlays();
+  renderCutsSidebar();
+}
+
+if (modalCancelBtn) {
+  modalCancelBtn.addEventListener("click", cancelActiveProcessing);
+}
+if (modalBackdropCloseX) {
+  modalBackdropCloseX.addEventListener("click", () => {
+    if (isProcessingRunning) {
+      if (confirm("Stop and cancel current video encoding job? (Your marked cuts will remain saved)")) {
+        cancelActiveProcessing();
+      }
+    } else {
+      hideModal();
+    }
+  });
+}
+
 async function runProcessing(action) {
   if (cuts.length === 0) {
     alert("Please mark at least one attempt before cutting!");
@@ -685,6 +746,7 @@ async function runProcessing(action) {
   const actionName = action === "cut_and_stitch" ? "Cutting & Stitching Highlights" : "Cutting Attempts";
   showModal(actionName, `Preparing GPU NVENC...`, true);
   startProgressPolling();
+  isProcessingRunning = true;
 
   try {
     const res = await fetch("/api/process", {
@@ -699,8 +761,15 @@ async function runProcessing(action) {
     });
     const data = await res.json();
     stopProgressPolling();
+    isProcessingRunning = false;
+
+    if (data.status === "cancelled") {
+      hideModal();
+      return;
+    }
 
     modalSpinner.style.display = "none";
+    if (modalActiveActions) modalActiveActions.style.display = "none";
     modalPercent.textContent = "100%";
     modalProgressFill.style.width = "100%";
     modalActions.style.display = "flex";
@@ -725,7 +794,9 @@ async function runProcessing(action) {
     }
   } catch (err) {
     stopProgressPolling();
+    isProcessingRunning = false;
     modalSpinner.style.display = "none";
+    if (modalActiveActions) modalActiveActions.style.display = "none";
     modalActions.style.display = "flex";
     modalTitle.textContent = "❌ Error Processing Video";
     modalMsg.textContent = err.message;
@@ -740,6 +811,7 @@ function showModal(title, msg, showSpinner = true) {
   modalPercent.textContent = "0%";
   modalProgressFill.style.width = "0%";
   modalSpinner.style.display = showSpinner ? "block" : "none";
+  if (modalActiveActions) modalActiveActions.style.display = showSpinner ? "flex" : "none";
   modalActions.style.display = "none";
   modalBackdrop.style.display = "flex";
 }
