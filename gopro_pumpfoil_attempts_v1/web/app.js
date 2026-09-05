@@ -365,12 +365,15 @@ function renderContinuousTimeline() {
 
     // Sticky Chapter Header
     const sessionNum = clip.sessionIndex !== undefined ? clip.sessionIndex : (cIdx + 1);
+    const isTooShort = !clip.frames || clip.frames.length === 0;
+
     const header = document.createElement("div");
-    header.className = "clip-sticky-header";
+    header.className = `clip-sticky-header ${isTooShort ? "clip-header-discarded" : ""}`;
     header.innerHTML = `
       <div class="clip-header-title">
         <span>🎬 ${clip.clipName}</span>
         <span class="clip-badge">Session ${sessionNum} &bull; Chapter ${clip.chapter}</span>
+        ${isTooShort ? '<span class="clip-badge-discard">Discarded</span>' : ''}
       </div>
       <div class="clip-header-meta">
         Duration: <b>${clip.durationStr}</b> &bull; ${clip.frameCount} frames
@@ -382,53 +385,66 @@ function renderContinuousTimeline() {
     const column = document.createElement("div");
     column.className = "frames-column";
 
-    clip.frames.forEach((f) => {
-      const card = document.createElement("div");
-      card.className = "frame-card";
-      card.dataset.clip = clip.clipName;
-      card.dataset.sec = f.sec;
-      card.dataset.idx = f.index;
+    if (isTooShort) {
+      const notice = document.createElement("div");
+      notice.className = "clip-discard-notice";
+      notice.innerHTML = `
+        <span class="discard-icon">⚠️</span>
+        <div class="discard-text">
+          <b>Clip is too short (${clip.durationStr}), discarding...</b>
+          <span>Recording duration is under sampling interval (${manifest.interval}s) or contains no usable frames.</span>
+        </div>
+      `;
+      column.appendChild(notice);
+    } else {
+      clip.frames.forEach((f) => {
+        const card = document.createElement("div");
+        card.className = "frame-card";
+        card.dataset.clip = clip.clipName;
+        card.dataset.sec = f.sec;
+        card.dataset.idx = f.index;
 
-      const imgUrl = `/api/thumbnail?dest=${encodeURIComponent(manifest.destDir)}&path=${encodeURIComponent(f.relPath)}`;
-      const img = document.createElement("img");
-      img.src = imgUrl;
-      img.loading = "lazy";
-      // Auto-retry on glitch
-      img.onerror = () => {
-        setTimeout(() => { img.src = `${imgUrl}&_t=${Date.now()}`; }, 300);
-      };
+        const imgUrl = `/api/thumbnail?dest=${encodeURIComponent(manifest.destDir)}&path=${encodeURIComponent(f.relPath)}`;
+        const img = document.createElement("img");
+        img.src = imgUrl;
+        img.loading = "lazy";
+        // Auto-retry on glitch
+        img.onerror = () => {
+          setTimeout(() => { img.src = `${imgUrl}&_t=${Date.now()}`; }, 300);
+        };
 
-      const timeBadge = document.createElement("div");
-      timeBadge.className = "badge-time";
-      timeBadge.textContent = f.timeStr;
+        const timeBadge = document.createElement("div");
+        timeBadge.className = "badge-time";
+        timeBadge.textContent = f.timeStr;
 
-      const idxBadge = document.createElement("div");
-      idxBadge.className = "badge-frame-idx";
-      idxBadge.textContent = `#${f.index + 1}`;
+        const idxBadge = document.createElement("div");
+        idxBadge.className = "badge-frame-idx";
+        idxBadge.textContent = `#${f.index + 1}`;
 
-      card.appendChild(img);
-      card.appendChild(timeBadge);
-      card.appendChild(idxBadge);
+        card.appendChild(img);
+        card.appendChild(timeBadge);
+        card.appendChild(idxBadge);
 
-      // Frame Click Handler (Instant Multi-Cut)
-      card.addEventListener("click", (e) => {
-        if (e.target.closest(".cut-delete-btn")) return;
-        onFrameClicked(clip.clipName, f.sec, f.index);
+        // Frame Click Handler (Instant Multi-Cut)
+        card.addEventListener("click", (e) => {
+          if (e.target.closest(".cut-delete-btn")) return;
+          onFrameClicked(clip.clipName, f.sec, f.index);
+        });
+
+        // Hover Magnifier
+        card.addEventListener("mouseenter", () => {
+          magnifierImg.src = img.src;
+          magnifierClip.textContent = clip.clipName;
+          magnifierTime.textContent = `${f.timeStr} (${f.sec.toFixed(1)}s)`;
+          hoverMagnifier.style.display = "block";
+        });
+        card.addEventListener("mouseleave", () => {
+          hoverMagnifier.style.display = "none";
+        });
+
+        column.appendChild(card);
       });
-
-      // Hover Magnifier
-      card.addEventListener("mouseenter", () => {
-        magnifierImg.src = img.src;
-        magnifierClip.textContent = clip.clipName;
-        magnifierTime.textContent = `${f.timeStr} (${f.sec.toFixed(1)}s)`;
-        hoverMagnifier.style.display = "block";
-      });
-      card.addEventListener("mouseleave", () => {
-        hoverMagnifier.style.display = "none";
-      });
-
-      column.appendChild(card);
-    });
+    }
 
     section.appendChild(column);
     verticalTimeline.appendChild(section);
