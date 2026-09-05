@@ -44,6 +44,13 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=WEB_DIR, **kwargs)
 
+    def end_headers(self):
+        # Prevent browser caching of HTML, JS, CSS so app updates immediately
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -78,12 +85,12 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Cache-Control", "public, max-age=86400")
-                self.end_headers()
+                super().end_headers()
                 with open(full_path, "rb") as f:
                     self.wfile.write(f.read())
             else:
                 self.send_response(404)
-                self.end_headers()
+                super().end_headers()
             return
 
         elif path == "/api/load_state":

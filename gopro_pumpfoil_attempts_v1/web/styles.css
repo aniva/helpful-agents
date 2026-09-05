@@ -625,6 +625,7 @@ input[type="text"]:focus, select:focus {
   z-index: 3000;
 }
 .modal-card {
+  position: relative;
   background: #161b22;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -633,6 +634,24 @@ input[type="text"]:focus, select:focus {
   width: 90%;
   text-align: center;
   box-shadow: 0 20px 48px rgba(0,0,0,0.8);
+}
+.modal-close-x {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 24px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+.modal-close-x:hover {
+  color: var(--text-main);
+  background: #21262d;
 }
 .spinner {
   width: 36px;

@@ -58,19 +58,34 @@ const btnResetSdCuts = document.getElementById("btnResetSdCuts");
 const modalConfirmDest = document.getElementById("modalConfirmDest");
 const confirmDestMsg = document.getElementById("confirmDestMsg");
 const confirmDestInput = document.getElementById("confirmDestInput");
+const btnCloseDestModal = document.getElementById("btnCloseDestModal");
 const btnCancelDestScan = document.getElementById("btnCancelDestScan");
 const btnConfirmDestProceed = document.getElementById("btnConfirmDestProceed");
 
 const modalReuseThumbs = document.getElementById("modalReuseThumbs");
 const reuseThumbsMsg = document.getElementById("reuseThumbsMsg");
+const btnCloseReuseModal = document.getElementById("btnCloseReuseModal");
+const btnCancelReuseThumbs = document.getElementById("btnCancelReuseThumbs");
 const btnReuseThumbs = document.getElementById("btnReuseThumbs");
 const btnRegenerateThumbs = document.getElementById("btnRegenerateThumbs");
+
+const btnRefreshApp = document.getElementById("btnRefreshApp");
 
 let userManuallyChangedDest = false;
 
 destDirInput.addEventListener("input", () => {
   userManuallyChangedDest = true;
 });
+
+// Refresh App: cleans cache and reloads page
+if (btnRefreshApp) {
+  btnRefreshApp.addEventListener("click", () => {
+    // Clear session cache and hard reload
+    localStorage.removeItem("pf_sourceDir");
+    localStorage.removeItem("pf_destDir");
+    window.location.reload(true);
+  });
+}
 
 function formatSec(seconds) {
   const s = Math.round(seconds);
@@ -95,10 +110,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     updateFrameSize(savedSize);
   }
 
+  // Detect GoPro drives if empty, but do NOT automatically pop up scans on load
   if (!srcDirInput.value) {
     await autoDetectSD();
-  } else if (srcDirInput.value && destDirInput.value) {
-    startTimelineWorkflow();
   }
 });
 
@@ -211,6 +225,9 @@ async function startTimelineWorkflow() {
 }
 
 // Modal actions for Confirm Destination
+btnCloseDestModal.addEventListener("click", () => {
+  modalConfirmDest.style.display = "none";
+});
 btnCancelDestScan.addEventListener("click", () => {
   modalConfirmDest.style.display = "none";
 });
@@ -224,6 +241,12 @@ btnConfirmDestProceed.addEventListener("click", () => {
 });
 
 // Modal actions for Thumbnail Reuse
+btnCloseReuseModal.addEventListener("click", () => {
+  modalReuseThumbs.style.display = "none";
+});
+btnCancelReuseThumbs.addEventListener("click", () => {
+  modalReuseThumbs.style.display = "none";
+});
 btnReuseThumbs.addEventListener("click", () => {
   modalReuseThumbs.style.display = "none";
   executeScan(true);

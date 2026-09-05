@@ -44,6 +44,7 @@
 
       <div class="config-actions">
         <button class="btn primary" id="btnScan">⚡ Load Timeline</button>
+        <button class="btn secondary" id="btnRefreshApp" title="Clear cache &amp; reload latest app version">🔄 Refresh App</button>
       </div>
     </div>
   </header>
@@ -143,6 +144,7 @@
   <!-- Pre-Scan Confirm Destination Modal -->
   <div class="modal-backdrop" id="modalConfirmDest" style="display: none;">
     <div class="modal-card">
+      <button class="modal-close-x" id="btnCloseDestModal" title="Cancel">&times;</button>
       <div class="modal-card-icon">📁</div>
       <h2>First Run on this Session</h2>
       <p id="confirmDestMsg">Output folder does not exist yet. Please confirm or edit the destination path before initial scan.</p>
@@ -160,10 +162,12 @@
   <!-- Pre-Scan Thumbnail Reuse Modal -->
   <div class="modal-backdrop" id="modalReuseThumbs" style="display: none;">
     <div class="modal-card">
+      <button class="modal-close-x" id="btnCloseReuseModal" title="Cancel">&times;</button>
       <div class="modal-card-icon">⚡</div>
       <h2>Existing Thumbnails Detected</h2>
       <p id="reuseThumbsMsg">Found existing cached thumbnails from a previous run in the destination folder.</p>
       <div class="modal-actions" style="margin-top: 20px;">
+        <button class="btn secondary" id="btnCancelReuseThumbs">Cancel</button>
         <button class="btn secondary" id="btnRegenerateThumbs">🔄 Regenerate Fresh</button>
         <button class="btn success" id="btnReuseThumbs">⚡ Reuse Existing (Instant)</button>
       </div>
