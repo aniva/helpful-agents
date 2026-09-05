@@ -35,8 +35,24 @@ def stitch_highlights(dest_dir, attempt_files=None, output_filename="PumpFoil_Hi
         attempt_files = glob.glob(os.path.join(attempts_dir, "Attempt_*.mp4"))
         attempt_files.sort(key=lambda f: int(pattern.search(os.path.basename(f)).group(1)) if pattern.search(os.path.basename(f)) else 9999)
 
-    if len(attempt_files) < 2:
-        return {"error": "Need at least 2 attempt clips to stitch highlights."}
+    if len(attempt_files) == 0:
+        return {"error": "No attempt clips found to stitch highlights."}
+
+    if len(attempt_files) == 1:
+        # Single attempt: copy or produce the output highlight directly
+        single_file = attempt_files[0]
+        try:
+            shutil.copy2(single_file, out_file)
+            total_dur = get_video_duration(out_file)
+            return {
+                "status": "ok",
+                "outputFile": out_file,
+                "filename": os.path.basename(out_file),
+                "clipCount": 1,
+                "duration": total_dur
+            }
+        except Exception as e:
+            return {"error": f"Failed copying single attempt clip: {e}"}
 
     has_nvenc = check_nvenc_available()
     faded_clips = []

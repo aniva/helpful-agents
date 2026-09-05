@@ -9,6 +9,18 @@ def check_nvenc_available():
     except Exception:
         return False
 
+def parse_time_str(t_str):
+    """Parses MM:SS or HH:MM:SS string to total seconds."""
+    parts = str(t_str).strip().split(":")
+    try:
+        if len(parts) == 2:
+            return float(parts[0]) * 60 + float(parts[1])
+        elif len(parts) == 3:
+            return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+    except Exception:
+        pass
+    return 0.0
+
 def cut_attempts(source_dir, dest_dir, cuts, progress_callback=None):
     """
     Renders each marked attempt into dest_dir/attempts/ using GPU NVENC (or CPU fallback)
@@ -22,9 +34,21 @@ def cut_attempts(source_dir, dest_dir, cuts, progress_callback=None):
 
     for idx, cut in enumerate(cuts, 1):
         clip_name = cut.get("clipName")
-        start_time = cut.get("startTime")
-        stop_time = cut.get("stopTime")
+        start_time = cut.get("startTime", "00:00")
+        stop_time = cut.get("stopTime", "00:00")
         label = cut.get("label", f"Attempt_{idx}").strip().replace(" ", "_")
+
+        s_sec = parse_time_str(start_time)
+        e_sec = parse_time_str(stop_time)
+        if e_sec <= s_sec:
+            print(f"Skipping invalid attempt {label}: stopTime ({stop_time}) <= startTime ({start_time})")
+            results.append({
+                "status": "error",
+                "label": label,
+                "file": clip_name,
+                "error": f"Invalid duration: {start_time} to {stop_time} (must be > 0s)"
+            })
+            continue
 
         in_file = os.path.join(source_dir, clip_name)
         clean_start = start_time.replace(":", "-")

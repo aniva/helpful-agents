@@ -33,7 +33,6 @@ const btnCloseSidebar = document.getElementById("btnCloseSidebar");
 const btnClearAllCuts = document.getElementById("btnClearAllCuts");
 const btnCutOnly = document.getElementById("btnCutOnly");
 const btnCutAndStitch = document.getElementById("btnCutAndStitch");
-const btnOpenFolder = document.getElementById("btnOpenFolder");
 const hoverMagnifier = document.getElementById("hoverMagnifier");
 const magnifierImg = document.getElementById("magnifierImg");
 const magnifierClip = document.getElementById("magnifierClip");
@@ -47,7 +46,6 @@ const modalProgressFill = document.getElementById("modalProgressFill");
 const modalDetails = document.getElementById("modalDetails");
 const modalActions = document.getElementById("modalActions");
 const modalCloseBtn = document.getElementById("modalCloseBtn");
-const modalOpenBtn = document.getElementById("modalOpenBtn");
 
 // New Pre-Scan Dialogs & SD Banner DOM
 const sdBanner = document.getElementById("sdBanner");
@@ -466,13 +464,17 @@ function onFrameClicked(clipName, sec, frameIdx) {
     let stopSec = sec;
 
     if (clipName === inProgressStart.clipName) {
+      if (Math.abs(sec - inProgressStart.sec) < 0.5) {
+        selectionText.innerHTML = `⚠️ Clicked the same frame! Please click a <b>different frame</b> to set end.`;
+        return;
+      }
       if (sec < inProgressStart.sec) {
         startSec = sec;
         stopSec = inProgressStart.sec;
       }
     } else {
       startSec = 0;
-      stopSec = sec;
+      stopSec = Math.max(1, sec);
     }
 
     const dur = Math.max(1, Math.round(stopSec - startSec));
@@ -687,14 +689,23 @@ async function runProcessing(action) {
     modalProgressFill.style.width = "100%";
     modalActions.style.display = "flex";
 
+    const destFolder = destDirInput.value.trim();
     if (action === "cut_and_stitch") {
-      modalTitle.textContent = "🎉 Highlights Successfully Created!";
-      modalMsg.textContent = `Extracted ${cuts.length} attempts and generated complete highlight reel with smooth transitions into ${destDirInput.value}!`;
-      modalDetails.textContent = "Video: PumpFoil_Highlights.mp4 (4K 60fps HEVC)";
+      if (data.stitchResult && data.stitchResult.error) {
+        modalTitle.textContent = "⚠️ Highlight Stitch Warning";
+        modalMsg.textContent = data.stitchResult.error;
+        modalDetails.innerHTML = `Attempt clips are saved in:<br><code style="user-select: all; background: #0d1117; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 6px;">${destFolder}\\attempts\\</code>`;
+      } else {
+        const hlFile = data.stitchResult && data.stitchResult.outputFile ? data.stitchResult.outputFile : `${destFolder}\\PumpFoil_Highlights.mp4`;
+        modalTitle.textContent = "🎉 Highlights Successfully Created!";
+        modalMsg.textContent = `Generated highlight reel with smooth transitions!`;
+        modalDetails.innerHTML = `Output file:<br><code style="user-select: all; background: #0d1117; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 6px;">${hlFile}</code>`;
+      }
     } else {
+      const succCount = (data.cutResults || []).filter(r => r.status === "success").length;
       modalTitle.textContent = "🎉 Attempts Successfully Cut!";
-      modalMsg.textContent = `Extracted ${cuts.length} attempts in pristine 4K 60fps into ${destDirInput.value}\\attempts!`;
-      modalDetails.textContent = "Saved to attempts subfolder with zero pixelation.";
+      modalMsg.textContent = `Extracted ${succCount} valid attempt clip(s) into destination!`;
+      modalDetails.innerHTML = `Saved to:<br><code style="user-select: all; background: #0d1117; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 6px;">${destFolder}\\attempts\\</code>`;
     }
   } catch (err) {
     stopProgressPolling();
@@ -705,33 +716,6 @@ async function runProcessing(action) {
   }
 }
 
-btnOpenFolder.addEventListener("click", async () => {
-  const dst = destDirInput.value.trim();
-  if (!dst) {
-    alert("Please specify a destination folder path first.");
-    return;
-  }
-  const prevText = btnOpenFolder.innerHTML;
-  btnOpenFolder.innerHTML = "⏳ Opening...";
-  try {
-    const res = await fetch("/api/open_folder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: dst })
-    });
-    const data = await res.json();
-    if (data.status === "error") {
-      alert("Could not open folder: " + data.error);
-    }
-  } catch (err) {
-    alert("Failed to contact server to open folder: " + err.message);
-  } finally {
-    setTimeout(() => {
-      btnOpenFolder.innerHTML = prevText;
-    }, 600);
-  }
-});
-modalOpenBtn.addEventListener("click", () => btnOpenFolder.click());
 modalCloseBtn.addEventListener("click", hideModal);
 
 function showModal(title, msg, showSpinner = true) {
