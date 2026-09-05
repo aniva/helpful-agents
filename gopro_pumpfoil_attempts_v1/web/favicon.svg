@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00d2ff"/>
+      <stop offset="100%" stop-color="#0066eb"/>
+    </linearGradient>
+    <linearGradient id="foil" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd600"/>
+      <stop offset="100%" stop-color="#ff9100"/>
+    </linearGradient>
+  </defs>
+  <!-- Background Badge -->
+  <rect width="64" height="64" rx="16" fill="url(#bg)"/>
+  <!-- Water Wave -->
+  <path d="M0 45 C 16 41, 32 49, 48 43 C 56 40, 60 41, 64 42 L 64 64 L 0 64 Z" fill="#004299" opacity="0.5"/>
+  <!-- Hydrofoil Mast -->
+  <path d="M 33 27 L 31 46 L 33.5 46 L 35 27 Z" fill="#ffffff" opacity="0.95"/>
+  <!-- Front Hydrofoil Wing -->
+  <path d="M 14 45 C 22 42, 42 42, 50 45 C 42 48, 22 48, 14 45 Z" fill="url(#foil)"/>
+  <!-- Board -->
+  <path d="M 18 27 C 22 24, 40 24, 46 27 C 48 28, 44 29.5, 40 29.5 C 32 29.5, 22 28.5, 18 27 Z" fill="#ffffff"/>
+  <!-- Foiler Silhouette -->
+  <circle cx="36" cy="13.5" r="3.5" fill="#ffffff"/>
+  <path d="M 36 17 L 33 22 L 27 26 L 29.5 28 L 34.5 23 L 37.5 27 L 41 26 L 36.5 19 Z" fill="#ffffff"/>
+</svg>

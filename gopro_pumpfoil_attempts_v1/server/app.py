@@ -66,7 +66,21 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
 
-        if path == "/api/progress":
+        if path in ["/favicon.ico", "/favicon.svg"]:
+            fav_path = os.path.join(WEB_DIR, "favicon.svg")
+            if os.path.exists(fav_path):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml")
+                self.send_header("Cache-Control", "public, max-age=86400")
+                super().end_headers()
+                with open(fav_path, "rb") as f:
+                    self.wfile.write(f.read())
+            else:
+                self.send_response(404)
+                super().end_headers()
+            return
+
+        elif path == "/api/progress":
             self.send_json(progress_state)
             return
 
