@@ -49,6 +49,29 @@ const modalActions = document.getElementById("modalActions");
 const modalCloseBtn = document.getElementById("modalCloseBtn");
 const modalOpenBtn = document.getElementById("modalOpenBtn");
 
+// New Pre-Scan Dialogs & SD Banner DOM
+const sdBanner = document.getElementById("sdBanner");
+const sdBannerText = document.getElementById("sdBannerText");
+const btnDismissSdBanner = document.getElementById("btnDismissSdBanner");
+const btnResetSdCuts = document.getElementById("btnResetSdCuts");
+
+const modalConfirmDest = document.getElementById("modalConfirmDest");
+const confirmDestMsg = document.getElementById("confirmDestMsg");
+const confirmDestInput = document.getElementById("confirmDestInput");
+const btnCancelDestScan = document.getElementById("btnCancelDestScan");
+const btnConfirmDestProceed = document.getElementById("btnConfirmDestProceed");
+
+const modalReuseThumbs = document.getElementById("modalReuseThumbs");
+const reuseThumbsMsg = document.getElementById("reuseThumbsMsg");
+const btnReuseThumbs = document.getElementById("btnReuseThumbs");
+const btnRegenerateThumbs = document.getElementById("btnRegenerateThumbs");
+
+let userManuallyChangedDest = false;
+
+destDirInput.addEventListener("input", () => {
+  userManuallyChangedDest = true;
+});
+
 function formatSec(seconds) {
   const s = Math.round(seconds);
   const m = Math.floor(s / 60);
@@ -75,7 +98,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (!srcDirInput.value) {
     await autoDetectSD();
   } else if (srcDirInput.value && destDirInput.value) {
-    loadTimeline();
+    startTimelineWorkflow();
   }
 });
 
@@ -141,10 +164,10 @@ function stopProgressPolling() {
   }
 }
 
-// 2. Load Timeline / Scan
-btnScan.addEventListener("click", () => loadTimeline());
+// 2. Pre-Scan Checks & Timeline Loading Workflow
+btnScan.addEventListener("click", () => startTimelineWorkflow());
 
-async function loadTimeline() {
+async function startTimelineWorkflow() {
   const src = srcDirInput.value.trim();
   const dst = destDirInput.value.trim();
   const interval = parseFloat(selInterval.value);
@@ -152,18 +175,112 @@ async function loadTimeline() {
   if (!src) { alert("Please specify a GoPro SD source directory."); return; }
   if (!dst) { alert("Please specify a destination folder."); return; }
 
+  // Check session state on server
+  try {
+    const res = await fetch("/api/check_session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceDir: src, destDir: dst, interval: interval })
+    });
+    const info = await res.json();
+
+    // Condition 1: If output folder does not exist for this recording, OR user manually changed the folder path in the menu
+    if (!info.destExists || userManuallyChangedDest) {
+      userManuallyChangedDest = false; // reset flag once confirmed
+      confirmDestInput.value = dst;
+      confirmDestMsg.textContent = !info.destExists
+        ? `Output folder does not exist: "${dst}". Confirm or edit destination path before initial scan:`
+        : `You changed the destination folder to: "${dst}". Confirm destination path before scanning:`;
+      modalConfirmDest.style.display = "flex";
+      return;
+    }
+
+    // Condition 2: Output folder exists from previous run, check if thumbnails exist
+    if (info.thumbnailsExist && info.thumbnailCount > 0) {
+      reuseThumbsMsg.innerHTML = `Found <b>${info.thumbnailCount}</b> cached thumbnails in <code>${dst}</code>.<br>Reuse existing thumbnails for instant loading, or regenerate fresh ones?`;
+      modalReuseThumbs.style.display = "flex";
+      return;
+    }
+
+    // If destination exists but no thumbnails, proceed with regular scan
+    executeScan(true);
+  } catch (err) {
+    console.error("Check session error:", err);
+    executeScan(true);
+  }
+}
+
+// Modal actions for Confirm Destination
+btnCancelDestScan.addEventListener("click", () => {
+  modalConfirmDest.style.display = "none";
+});
+btnConfirmDestProceed.addEventListener("click", () => {
+  const newDst = confirmDestInput.value.trim();
+  if (newDst) {
+    destDirInput.value = newDst;
+  }
+  modalConfirmDest.style.display = "none";
+  executeScan(true);
+});
+
+// Modal actions for Thumbnail Reuse
+btnReuseThumbs.addEventListener("click", () => {
+  modalReuseThumbs.style.display = "none";
+  executeScan(true);
+});
+btnRegenerateThumbs.addEventListener("click", () => {
+  modalReuseThumbs.style.display = "none";
+  executeScan(false);
+});
+
+// SD Banner Actions
+btnDismissSdBanner.addEventListener("click", () => {
+  sdBanner.style.display = "none";
+});
+btnResetSdCuts.addEventListener("click", async () => {
+  if (confirm("Are you sure you want to clear all cuts from both the SD card and destination?")) {
+    const src = srcDirInput.value.trim();
+    const dst = destDirInput.value.trim();
+    await fetch("/api/clear_sd_cuts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceDir: src, destDir: dst })
+    });
+    cuts = [];
+    localStorage.removeItem(`pf_cuts_${dst}`);
+    sdBanner.style.display = "none";
+    updateCutVisualOverlays();
+    updateStats();
+    renderCutsSidebar();
+  }
+});
+
+async function executeScan(reuseThumbnails = true) {
+  const src = srcDirInput.value.trim();
+  const dst = destDirInput.value.trim();
+  const interval = parseFloat(selInterval.value);
+
   localStorage.setItem("pf_sourceDir", src);
   localStorage.setItem("pf_destDir", dst);
   localStorage.setItem("pf_interval", interval);
 
-  showModal("Scanning GoPro Footage...", "Gathering video files...", true);
+  showModal(
+    reuseThumbnails ? "Loading Timeline..." : "Scanning GoPro Footage...",
+    reuseThumbnails ? "Loading cached thumbnails..." : "Extracting frames at full speed...",
+    true
+  );
   startProgressPolling();
 
   try {
     const res = await fetch("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sourceDir: src, destDir: dst, interval: interval })
+      body: JSON.stringify({
+        sourceDir: src,
+        destDir: dst,
+        interval: interval,
+        reuseThumbnails: reuseThumbnails
+      })
     });
     const data = await res.json();
     stopProgressPolling();
@@ -182,7 +299,14 @@ async function loadTimeline() {
     // Restore cuts
     if (data.savedCuts && data.savedCuts.length > 0) {
       cuts = data.savedCuts;
+      if (data.cutsSource === "sd_card") {
+        sdBannerText.innerHTML = `Loaded <b>${cuts.length}</b> saved attempts directly from GoPro SD card.`;
+        sdBanner.style.display = "flex";
+      } else {
+        sdBanner.style.display = "none";
+      }
     } else {
+      sdBanner.style.display = "none";
       const localCutsKey = `pf_cuts_${dst}`;
       const localCuts = localStorage.getItem(localCutsKey);
       if (localCuts) {
@@ -217,13 +341,13 @@ function renderContinuousTimeline() {
     section.dataset.clip = clip.clipName;
 
     // Sticky Chapter Header
+    const sessionNum = clip.sessionIndex !== undefined ? clip.sessionIndex : (cIdx + 1);
     const header = document.createElement("div");
     header.className = "clip-sticky-header";
     header.innerHTML = `
       <div class="clip-header-title">
         <span>🎬 ${clip.clipName}</span>
-        <span class="clip-badge">Chapter ${clip.chapter}</span>
-        <span style="font-size: 13px; font-weight: normal; color: #8b949e;">(Session ${clip.session})</span>
+        <span class="clip-badge">Session ${sessionNum} &bull; Chapter ${clip.chapter}</span>
       </div>
       <div class="clip-header-meta">
         Duration: <b>${clip.durationStr}</b> &bull; ${clip.frameCount} frames

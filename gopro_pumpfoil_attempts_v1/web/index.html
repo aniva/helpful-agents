@@ -48,6 +48,18 @@
     </div>
   </header>
 
+  <!-- SD Cuts Notice Banner -->
+  <div class="sd-banner" id="sdBanner" style="display: none;">
+    <div class="sd-banner-content">
+      <span class="sd-banner-icon">💾</span>
+      <span id="sdBannerText">Found saved cuts on SD card.</span>
+    </div>
+    <div class="sd-banner-actions">
+      <button class="btn sm outline" id="btnDismissSdBanner">Keep Cuts</button>
+      <button class="btn sm danger" id="btnResetSdCuts">🗑️ Clear / Start From Scratch</button>
+    </div>
+  </div>
+
   <!-- Sticky Action Toolbar -->
   <nav class="sticky-toolbar">
     <div class="toolbar-left">
@@ -107,7 +119,7 @@
         <button class="btn-icon" id="btnCloseSidebar">&times;</button>
       </div>
       <div class="sidebar-info-note">
-        💡 Every mouse selection is saved automatically to <code>cuts.txt</code>.
+        💡 Every mouse selection is saved automatically to <code>cuts.txt</code> and mirrored to your SD card.
       </div>
       <div class="cuts-list-scroll" id="cutsListScroll">
         <div class="empty-cuts-hint">No attempts marked yet. Click a start frame then end frame on the timeline to create an attempt.</div>
@@ -125,6 +137,36 @@
     <div class="magnifier-badge">
       <span id="magnifierClip">Clip</span>
       <span id="magnifierTime">00:00</span>
+    </div>
+  </div>
+
+  <!-- Pre-Scan Confirm Destination Modal -->
+  <div class="modal-backdrop" id="modalConfirmDest" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-card-icon">📁</div>
+      <h2>First Run on this Session</h2>
+      <p id="confirmDestMsg">Output folder does not exist yet. Please confirm or edit the destination path before initial scan.</p>
+      <div class="modal-input-box">
+        <label>Destination Path:</label>
+        <input type="text" id="confirmDestInput" value="" style="margin-top: 4px; font-family: monospace;">
+      </div>
+      <div class="modal-actions" style="margin-top: 20px;">
+        <button class="btn secondary" id="btnCancelDestScan">Cancel</button>
+        <button class="btn primary" id="btnConfirmDestProceed">⚡ Create Folder &amp; Scan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pre-Scan Thumbnail Reuse Modal -->
+  <div class="modal-backdrop" id="modalReuseThumbs" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-card-icon">⚡</div>
+      <h2>Existing Thumbnails Detected</h2>
+      <p id="reuseThumbsMsg">Found existing cached thumbnails from a previous run in the destination folder.</p>
+      <div class="modal-actions" style="margin-top: 20px;">
+        <button class="btn secondary" id="btnRegenerateThumbs">🔄 Regenerate Fresh</button>
+        <button class="btn success" id="btnReuseThumbs">⚡ Reuse Existing (Instant)</button>
+      </div>
     </div>
   </div>
 

@@ -7,6 +7,12 @@ import re
 from datetime import datetime
 
 def parse_gopro_filename(filename):
+    """
+    Extracts (raw_session_id, chapter_number) from GoPro filenames.
+    e.g. GX015264.MP4 -> (5264, 1)
+         GX025265.MP4 -> (5265, 2)
+         GOPR0012.MP4 -> (12, 0)
+    """
     base = os.path.splitext(os.path.basename(filename))[0]
     m = re.match(r"^G[XHLP](\d{2})(\d{4})$", base, re.IGNORECASE)
     if m:
@@ -39,7 +45,7 @@ def get_video_duration(video_path):
     except Exception:
         return 0.0
 
-def scan_and_extract_timeline(source_dir, dest_dir, interval=4.0, progress_callback=None):
+def scan_and_extract_timeline(source_dir, dest_dir, interval=4.0, reuse_thumbnails=True, progress_callback=None):
     os.makedirs(dest_dir, exist_ok=True)
     thumb_base_dir = os.path.join(dest_dir, f".thumbnails_{int(interval)}s")
     os.makedirs(thumb_base_dir, exist_ok=True)
@@ -56,18 +62,14 @@ def scan_and_extract_timeline(source_dir, dest_dir, interval=4.0, progress_callb
     if not mp4_files:
         return {"error": f"No MP4 video files found in {source_dir}"}
 
-    mp4_files.sort(key=parse_gopro_filename)
-
-    # First pass: gather info and calculate total duration
-    clip_infos = []
-    total_session_dur = 0.0
-
+    # Gather info for all valid clips
+    raw_clips = []
     if progress_callback:
         progress_callback(1, "Inspecting GoPro files...", "Reading clip metadata...")
 
     for mp4 in mp4_files:
         base = os.path.splitext(os.path.basename(mp4))[0]
-        session, chapter = parse_gopro_filename(mp4)
+        raw_session, chapter = parse_gopro_filename(mp4)
 
         lrv_name = "GL" + base[2:] + ".LRV"
         lrv_path = os.path.join(source_dir, lrv_name)
@@ -80,20 +82,51 @@ def scan_and_extract_timeline(source_dir, dest_dir, interval=4.0, progress_callb
         if dur < 3.0:
             continue
 
-        clip_infos.append({
+        try:
+            mtime = os.path.getmtime(mp4)
+        except Exception:
+            mtime = 0.0
+
+        raw_clips.append({
             "mp4": mp4,
             "base": base,
-            "session": session,
+            "raw_session": raw_session,
             "chapter": chapter,
             "src_video": src_video,
-            "dur": dur
+            "dur": dur,
+            "mtime": mtime
         })
-        total_session_dur += dur
 
-    if not clip_infos:
+    if not raw_clips:
         return {"error": "No valid clips found."}
 
-    total_session_dur = max(1.0, total_session_dur)
+    # Group clips by raw GoPro session ID
+    session_groups = {}
+    for c in raw_clips:
+        rs = c["raw_session"]
+        session_groups.setdefault(rs, []).append(c)
+
+    # Sort groups chronologically by the earliest clip's timestamp / chapter 1
+    sorted_sessions = []
+    for rs, group in session_groups.items():
+        # sort within group by chapter number
+        group.sort(key=lambda x: x["chapter"])
+        earliest_time = min(x["mtime"] for x in group)
+        sorted_sessions.append({
+            "raw_session": rs,
+            "earliest_time": earliest_time,
+            "clips": group
+        })
+    sorted_sessions.sort(key=lambda s: (s["earliest_time"], s["raw_session"]))
+
+    # Flatten into ordered list of clips with sequential 1-based sessionIndex
+    clip_infos = []
+    for session_idx, sdata in enumerate(sorted_sessions, 1):
+        for c in sdata["clips"]:
+            c["sessionIndex"] = session_idx
+            clip_infos.append(c)
+
+    total_session_dur = max(1.0, sum(c["dur"] for c in clip_infos))
     clips = []
     processed_dur = 0.0
     global_time = 0.0
@@ -104,8 +137,9 @@ def scan_and_extract_timeline(source_dir, dest_dir, interval=4.0, progress_callb
         base = cinfo["base"]
         dur = cinfo["dur"]
         src_video = cinfo["src_video"]
-        session = cinfo["session"]
+        raw_session = cinfo["raw_session"]
         chapter = cinfo["chapter"]
+        session_index = cinfo["sessionIndex"]
         mp4 = cinfo["mp4"]
 
         clip_thumb_dir = os.path.join(thumb_base_dir, base)
@@ -113,6 +147,15 @@ def scan_and_extract_timeline(source_dir, dest_dir, interval=4.0, progress_callb
 
         expected_count = max(1, math.floor(dur / interval))
         existing_thumbs = sorted(glob.glob(os.path.join(clip_thumb_dir, "thumb_*.jpg")))
+
+        # If user chose NOT to reuse thumbnails, remove old ones
+        if not reuse_thumbnails and existing_thumbs:
+            for old_t in existing_thumbs:
+                try:
+                    os.remove(old_t)
+                except Exception:
+                    pass
+            existing_thumbs = []
 
         if len(existing_thumbs) < expected_count - 1:
             cmd = [
@@ -171,7 +214,8 @@ def scan_and_extract_timeline(source_dir, dest_dir, interval=4.0, progress_callb
         clips.append({
             "clipName": os.path.basename(mp4),
             "baseName": base,
-            "session": session,
+            "sessionIndex": session_index,
+            "rawSession": raw_session,
             "chapter": chapter,
             "duration": round(dur, 2),
             "durationStr": format_time_str(dur),

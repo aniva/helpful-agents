@@ -8,7 +8,10 @@ import webbrowser
 import threading
 import subprocess
 
-from detector import detect_gopro, suggest_destination, to_local_path, is_windows
+from detector import (
+    detect_gopro, suggest_destination, to_local_path, is_windows,
+    load_sd_metadata, save_sd_metadata, mirror_cuts_to_sd, load_sd_cuts, delete_sd_cuts
+)
 from extractor import scan_and_extract_timeline
 from cutter import cut_attempts, sync_cuts_file
 from stitcher import stitch_highlights
@@ -54,10 +57,15 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             detected = detect_gopro()
             suggested_src = detected[0] if detected else ""
             suggested_dst = suggest_destination(suggested_src)
+            # Check if SD card already has a linked destination in metadata
+            sd_meta = load_sd_metadata(suggested_src) if suggested_src else None
+            if sd_meta and sd_meta.get("destDir"):
+                suggested_dst = sd_meta["destDir"]
             self.send_json({
                 "detectedSources": detected,
                 "suggestedSource": suggested_src,
-                "suggestedDestination": suggested_dst
+                "suggestedDestination": suggested_dst,
+                "sdMetadata": sd_meta
             })
             return
 
@@ -80,12 +88,20 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
 
         elif path == "/api/load_state":
             dest_dir = to_local_path(query.get("dest", [""])[0])
+            src_dir = to_local_path(query.get("src", [""])[0])
             state_file = os.path.join(dest_dir, "session_state.json")
+            cuts = []
             if os.path.exists(state_file):
                 with open(state_file, "r", encoding="utf-8") as f:
-                    self.send_json(json.load(f))
-            else:
-                self.send_json({"cuts": []})
+                    try:
+                        data = json.load(f)
+                        cuts = data.get("cuts", [])
+                    except Exception:
+                        pass
+            elif src_dir:
+                # Try SD card cuts
+                cuts = load_sd_cuts(src_dir)
+            self.send_json({"cuts": cuts})
             return
 
         return super().do_GET()
@@ -100,10 +116,65 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             data = {}
 
-        if path == "/api/scan":
+        if path == "/api/check_session":
             src = to_local_path(data.get("sourceDir", ""))
             dst = to_local_path(data.get("destDir", ""))
             interval = float(data.get("interval", 4.0))
+
+            dest_exists = os.path.exists(dst)
+            thumb_dir = os.path.join(dst, f".thumbnails_{int(interval)}s")
+            thumbs_exist = False
+            thumb_count = 0
+            if os.path.exists(thumb_dir):
+                import glob
+                all_thumbs = glob.glob(os.path.join(thumb_dir, "*", "thumb_*.jpg"))
+                thumb_count = len(all_thumbs)
+                thumbs_exist = thumb_count > 0
+
+            sd_meta = load_sd_metadata(src) if src else None
+            sd_cuts = load_sd_cuts(src) if src else []
+
+            self.send_json({
+                "destExists": dest_exists,
+                "thumbnailsExist": thumbs_exist,
+                "thumbnailCount": thumb_count,
+                "sdMetadata": sd_meta,
+                "hasSdCuts": len(sd_cuts) > 0,
+                "sdCutCount": len(sd_cuts),
+                "sdCuts": sd_cuts
+            })
+            return
+
+        elif path == "/api/clear_sd_cuts":
+            src = to_local_path(data.get("sourceDir", ""))
+            dst = to_local_path(data.get("destDir", ""))
+            delete_sd_cuts(src)
+            # Also clear destination cuts.txt if requested
+            if dst and os.path.exists(dst):
+                cuts_f = os.path.join(dst, "cuts.txt")
+                if os.path.exists(cuts_f):
+                    try:
+                        os.remove(cuts_f)
+                    except Exception:
+                        pass
+                state_f = os.path.join(dst, "session_state.json")
+                if os.path.exists(state_f):
+                    try:
+                        with open(state_f, "r", encoding="utf-8") as sf:
+                            sdata = json.load(sf)
+                        sdata["cuts"] = []
+                        with open(state_f, "w", encoding="utf-8") as sf:
+                            json.dump(sdata, sf, indent=2)
+                    except Exception:
+                        pass
+            self.send_json({"status": "ok"})
+            return
+
+        elif path == "/api/scan":
+            src = to_local_path(data.get("sourceDir", ""))
+            dst = to_local_path(data.get("destDir", ""))
+            interval = float(data.get("interval", 4.0))
+            reuse_thumbs = bool(data.get("reuseThumbnails", True))
 
             if not os.path.exists(src):
                 self.send_json({"error": f"Source directory not found: {src}"}, status=400)
@@ -111,26 +182,41 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
 
             report_progress(0, "Starting scan...", "Initializing thumbnail extraction...", title="Scanning GoPro Footage", active=True)
             manifest = scan_and_extract_timeline(
-                src, dst, interval,
+                src, dst, interval, reuse_thumbnails=reuse_thumbs,
                 progress_callback=lambda p, m, d: report_progress(p, m, d, title="Scanning GoPro Footage")
             )
             report_progress(100, "Done!", "Timeline ready.", active=False)
             
+            # Save metadata to SD card linking to this destination
+            save_sd_metadata(src, dst)
+
+            # Check existing cuts (destination state first, fallback to SD card)
             state_file = os.path.join(dst, "session_state.json")
             existing_cuts = []
+            source_of_cuts = None
             if os.path.exists(state_file):
                 try:
                     with open(state_file, "r", encoding="utf-8") as sf:
                         sdata = json.load(sf)
                         existing_cuts = sdata.get("cuts", [])
+                        if existing_cuts:
+                            source_of_cuts = "destination"
                 except Exception:
                     pass
+            if not existing_cuts and src:
+                sd_cuts = load_sd_cuts(src)
+                if sd_cuts:
+                    existing_cuts = sd_cuts
+                    source_of_cuts = "sd_card"
+
             manifest["savedCuts"] = existing_cuts
+            manifest["cutsSource"] = source_of_cuts
 
             self.send_json(manifest)
             return
 
         elif path == "/api/sync_cuts":
+            src = to_local_path(data.get("sourceDir", ""))
             dst = to_local_path(data.get("destDir", ""))
             cuts = data.get("cuts", [])
             state = {
@@ -142,7 +228,7 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             os.makedirs(dst, exist_ok=True)
             with open(os.path.join(dst, "session_state.json"), "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
-            sync_cuts_file(dst, cuts)
+            sync_cuts_file(dst, cuts, source_dir=src)
             self.send_json({"status": "ok", "count": len(cuts)})
             return
 
@@ -152,7 +238,7 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             dst = to_local_path(data.get("destDir", ""))
             cuts = data.get("cuts", [])
 
-            sync_cuts_file(dst, cuts)
+            sync_cuts_file(dst, cuts, source_dir=src)
 
             cut_results = []
             stitch_result = None

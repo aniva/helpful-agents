@@ -70,8 +70,8 @@ def cut_attempts(source_dir, dest_dir, cuts, progress_callback=None):
 
     return results
 
-def sync_cuts_file(dest_dir, cuts):
-    """Saves the current cuts list to cuts.txt in the destination directory."""
+def sync_cuts_file(dest_dir, cuts, source_dir=None):
+    """Saves the current cuts list to cuts.txt in the destination directory and mirrors to source SD card."""
     os.makedirs(dest_dir, exist_ok=True)
     cuts_file = os.path.join(dest_dir, "cuts.txt")
     lines = [
@@ -87,4 +87,14 @@ def sync_cuts_file(dest_dir, cuts):
     
     with open(cuts_file, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+
+    # Mirror to SD card if source_dir provided
+    if source_dir:
+        try:
+            from detector import mirror_cuts_to_sd, save_sd_metadata
+            mirror_cuts_to_sd(source_dir, cuts)
+            save_sd_metadata(source_dir, dest_dir, {"cutCount": len(cuts)})
+        except Exception as e:
+            print(f"Warning: Could not mirror to SD: {e}")
+
     return cuts_file
