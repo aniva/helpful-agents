@@ -280,13 +280,29 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         elif path == "/api/open_folder":
-            folder = to_local_path(data.get("path", ""))
-            if os.path.exists(folder):
-                if is_windows():
-                    os.startfile(folder)
-                else:
-                    subprocess.run(["explorer.exe", folder.replace("/mnt/c", "C:").replace("/mnt/e", "E:").replace("/", "\\")])
-            self.send_json({"status": "ok"})
+            raw_path = data.get("path", "")
+            folder = to_local_path(raw_path)
+            if folder:
+                try:
+                    os.makedirs(folder, exist_ok=True)
+                    if is_windows():
+                        os.startfile(folder)
+                    else:
+                        # Translate WSL path to Windows path for explorer.exe
+                        win_path = folder
+                        if folder.startswith("/mnt/"):
+                            parts = folder.split("/")
+                            if len(parts) >= 3 and len(parts[2]) == 1:
+                                drive = parts[2].upper()
+                                rest = "\\".join(parts[3:])
+                                win_path = f"{drive}:\\{rest}"
+                        subprocess.run(["explorer.exe", win_path])
+                    self.send_json({"status": "ok", "path": folder, "opened": True})
+                    return
+                except Exception as e:
+                    self.send_json({"status": "error", "error": str(e), "path": folder})
+                    return
+            self.send_json({"status": "error", "error": "No path specified"})
             return
 
         self.send_response(404)

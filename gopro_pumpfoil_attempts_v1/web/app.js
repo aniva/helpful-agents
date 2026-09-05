@@ -707,12 +707,28 @@ async function runProcessing(action) {
 
 btnOpenFolder.addEventListener("click", async () => {
   const dst = destDirInput.value.trim();
-  if (dst) {
-    await fetch("/api/open_folder", {
+  if (!dst) {
+    alert("Please specify a destination folder path first.");
+    return;
+  }
+  const prevText = btnOpenFolder.innerHTML;
+  btnOpenFolder.innerHTML = "⏳ Opening...";
+  try {
+    const res = await fetch("/api/open_folder", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: dst })
     });
+    const data = await res.json();
+    if (data.status === "error") {
+      alert("Could not open folder: " + data.error);
+    }
+  } catch (err) {
+    alert("Failed to contact server to open folder: " + err.message);
+  } finally {
+    setTimeout(() => {
+      btnOpenFolder.innerHTML = prevText;
+    }, 600);
   }
 });
 modalOpenBtn.addEventListener("click", () => btnOpenFolder.click());
