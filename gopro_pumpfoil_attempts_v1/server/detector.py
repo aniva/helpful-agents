@@ -69,9 +69,67 @@ def detect_gopro():
     return detected
 
 def suggest_destination(source_dir=None):
-    """Suggests an appropriate destination directory on a fast secondary drive (e.g. E:)."""
-    today_str = datetime.now().strftime("%Y%m%d")
-    folder_name = f"{today_str}_PumpFoil"
+    """
+    Suggests an appropriate destination directory on a fast secondary drive (e.g. E:).
+    Folder name format: GOPRO_<recording date>_<first recording start time>
+    e.g. GOPRO_20260627_1009
+    """
+    folder_name = None
+
+    if source_dir:
+        src_path = to_local_path(source_dir)
+        if os.path.exists(src_path):
+            all_mp4 = glob.glob(os.path.join(src_path, "*.MP4")) + glob.glob(os.path.join(src_path, "*.mp4"))
+            # remove duplicates
+            seen = set()
+            unique_mp4 = []
+            for f in all_mp4:
+                nc = os.path.normcase(os.path.abspath(f))
+                if nc not in seen:
+                    seen.add(nc)
+                    unique_mp4.append(f)
+
+            if unique_mp4:
+                # Find earliest recording session
+                try:
+                    from server.extractor import parse_gopro_filename, get_video_duration
+                except ImportError:
+                    from extractor import parse_gopro_filename, get_video_duration
+                raw_clips = []
+                for f in unique_mp4:
+                    raw_s, ch = parse_gopro_filename(f)
+                    try:
+                        mtime = os.path.getmtime(f)
+                    except Exception:
+                        mtime = 0.0
+                    raw_clips.append({"file": f, "raw_s": raw_s, "ch": ch, "mtime": mtime})
+
+                session_groups = {}
+                for c in raw_clips:
+                    session_groups.setdefault(c["raw_s"], []).append(c)
+
+                sorted_sessions = []
+                for rs, group in session_groups.items():
+                    group.sort(key=lambda x: x["ch"])
+                    earliest_time = min(x["mtime"] for x in group)
+                    sorted_sessions.append({"raw_s": rs, "earliest_time": earliest_time, "first_clip": group[0]})
+
+                sorted_sessions.sort(key=lambda s: (s["earliest_time"], s["raw_s"]))
+                first_clip_info = sorted_sessions[0]["first_clip"]
+                first_file = first_clip_info["file"]
+                mtime = first_clip_info["mtime"]
+                dur = get_video_duration(first_file)
+                # Recording start time = modification time minus duration
+                start_epoch = max(0.0, mtime - dur) if mtime > 0 else 0.0
+                if start_epoch > 0:
+                    dt = datetime.fromtimestamp(start_epoch)
+                    rec_date = dt.strftime("%Y%m%d")
+                    rec_time = dt.strftime("%H%M")
+                    folder_name = f"GOPRO_{rec_date}_{rec_time}"
+
+    if not folder_name:
+        now = datetime.now()
+        folder_name = f"GOPRO_{now.strftime('%Y%m%d')}_{now.strftime('%H%M')}"
 
     if is_windows():
         for d in ["E:\\", "D:\\", os.path.expanduser("~\\Videos")]:

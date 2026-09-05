@@ -64,10 +64,8 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             detected = detect_gopro()
             suggested_src = detected[0] if detected else ""
             suggested_dst = suggest_destination(suggested_src)
-            # Check if SD card already has a linked destination in metadata
             sd_meta = load_sd_metadata(suggested_src) if suggested_src else None
-            if sd_meta and sd_meta.get("destDir"):
-                suggested_dst = sd_meta["destDir"]
+            # Always suggest GOPRO_<recording date>_<first recording start time>
             self.send_json({
                 "detectedSources": detected,
                 "suggestedSource": suggested_src,
